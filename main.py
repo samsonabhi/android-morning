@@ -12,8 +12,9 @@ import urllib.request
 import urllib.error
 import json
 import urllib.parse
-import hashlib
 import re
+import time
+import shutil
 
 
 # Holiday and special events database
@@ -34,24 +35,28 @@ class FunApp(App):
         # Initialize with loading state
         self.events = []
         self.current_event_index = 0
-        
+        self._quotes_cache = []
+
+        # Clean dataset folder on startup
+        self._clean_dataset()
+
         # Layout
         self.layout = BoxLayout(orientation='vertical')
         
         # Event title label
         self.event_title = Label(
             text="Loading today's events...",
-            font_size=28,
+            font_size=20,
             bold=True,
             halign='center',
             valign='middle',
-            size_hint=(1, 0.15)
+            size_hint=(1, 0.20)
         )
         self.event_title.bind(size=self.event_title.setter('text_size'))
         
         # Image widget
         self.image = Image(
-            size_hint=(1, 0.55)
+            size_hint=(1, 0.50)
         )
         
         # Quote label
@@ -66,9 +71,13 @@ class FunApp(App):
         
         # Button
         self.button = Button(
-            text="Next Event / Quote",
+            text="Next  ▶  Event / Quote",
             font_size=20,
-            size_hint=(1, 0.1)
+            bold=True,
+            size_hint=(1, 0.1),
+            background_normal='',
+            background_color=(0.18, 0.53, 0.93, 1),
+            color=(1, 1, 1, 1),
         )
         self.button.bind(on_press=self.show_next_event)
         
@@ -81,6 +90,16 @@ class FunApp(App):
         self.load_today_events()
         
         return self.layout
+
+    def on_stop(self):
+        self._clean_dataset()
+
+    def _clean_dataset(self):
+        """Remove all files from the dataset folder"""
+        dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+        if os.path.exists(dataset_dir):
+            shutil.rmtree(dataset_dir)
+        os.makedirs(dataset_dir)
     
     def load_today_events(self):
         """Load today's events from Wikipedia 'On this day' and special events"""
@@ -104,8 +123,9 @@ class FunApp(App):
                 
                 # Try to fetch Wikipedia events
                 try:
-                    month_name = now.strftime('%B').lower()
-                    url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month_name}/{day}"
+                    month_str = now.strftime('%m')
+                    day_str = now.strftime('%d')
+                    url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month_str}/{day_str}"
                     
                     headers = {
                         'User-Agent': 'DailyEventsApp/1.0 (learning@project.com)'
@@ -119,10 +139,10 @@ class FunApp(App):
                             year = event.get('year', 'Unknown')
                             text = event.get('text', '')
                             
-                            # Extract event name from text
-                            event_name = text.split('.')[0] if '.' in text else text[:50]
-                            if len(event_name) > 50:
-                                event_name = event_name[:47] + "..."
+                            # Extract event name from the first sentence
+                            event_name = text.split('.')[0] if '.' in text else text
+                            if len(event_name) > 100:
+                                event_name = event_name[:97] + "..."
                             
                             # Create keyword from event text
                             keyword = self.extract_keyword(text)
@@ -207,38 +227,9 @@ class FunApp(App):
             return ' '.join(keywords[:3])  # Take first 3 keywords
         else:
             return 'historical event'
-    
-    def generate_quotes_for_event(self, event_name, year):
-        """Fetch real quotes from Quotable API"""
-        # Fallback quotes for when API is unavailable
-        fallback_quotes = [
-            f"Every moment with {event_name} is precious!",
-            f"Celebrate the significance of {year} and today!",
-            f"Today reminds us of historical moments like {event_name}!"
-        ]
-        
-        try:
-            # Fetch random quotes from Quotable API
-            url = "https://api.quotable.io/random?limit=3&minLength=50&maxLength=150"
-            headers = {'User-Agent': 'DailyEventsApp/1.0'}
-            
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read())
-                
-                if 'content' in data:
-                    quote = data['content']
-                    author = data.get('author', 'Unknown').replace(', type.author', '')
-                    return [f'"{quote}" - {author}']
-                    
-        except Exception as e:
-            pass
-        
-        return fallback_quotes
-    
+
     def fetch_multiple_quotes(self, count=3):
-        """Fetch multiple quotes from API for an event"""
-        quotes = []
+        """Fetch multiple quotes using ZenQuotes API, cached for the session"""
         fallback_quotes = [
             "Every day is a chance for greatness!",
             "Embrace the present moment!",
@@ -246,27 +237,25 @@ class FunApp(App):
             "Make today count!",
             "Celebrate the gift of existence!"
         ]
-        
+
         try:
-            for _ in range(count):
-                url = "https://api.quotable.io/random?minLength=50&maxLength=150"
+            if not self._quotes_cache:
+                url = "https://zenquotes.io/api/quotes"
                 headers = {'User-Agent': 'DailyEventsApp/1.0'}
-                
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     data = json.loads(response.read())
-                    
-                    if 'content' in data:
-                        quote = data['content']
-                        author = data.get('author', 'Unknown').replace(', type.author', '')
-                        quotes.append(f'"{quote}" - {author}')
-                    else:
-                        quotes.append(random.choice(fallback_quotes))
-            
-            return quotes if quotes else fallback_quotes
-            
-        except Exception as e:
-            return fallback_quotes
+                    self._quotes_cache = [
+                        f'"{item["q"]}" - {item.get("a", "Unknown")}'
+                        for item in data if item.get("q")
+                    ]
+
+            if self._quotes_cache:
+                return random.sample(self._quotes_cache, min(count, len(self._quotes_cache)))
+        except Exception:
+            pass
+
+        return random.sample(fallback_quotes, min(count, len(fallback_quotes)))
     
     @mainthread
     def update_event_ui(self, index):
@@ -277,13 +266,12 @@ class FunApp(App):
             self.quote_label.text = random.choice(event["quotes"])
             self.load_event_image(index)
     
-    def get_cached_image_path(self, keyword):
-        """Get cached image path based on keyword hash"""
-        keyword_hash = hashlib.md5(keyword.encode()).hexdigest()
-        output_path = "dataset"
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
-        return os.path.join(output_path, f"image_{keyword_hash}.jpg")
+    def get_cached_image_path(self):
+        """Return the single reused image path (keeps dataset folder to one file)"""
+        dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+        if not os.path.exists(dataset_dir):
+            os.makedirs(dataset_dir)
+        return os.path.join(dataset_dir, 'current.jpg')
     
     def get_high_quality_image_url(self, keyword):
         """Get high quality image URL using Google Image search or fallback sources"""
@@ -329,20 +317,36 @@ class FunApp(App):
 
         return "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop"
     
+    @mainthread
+    def _set_button_loading(self):
+        self.button.disabled = True
+        self.button.text = "Loading image…"
+        self.button.background_color = (0.45, 0.45, 0.45, 1)
+        self.image.source = ''
+
+    @mainthread
+    def _set_button_ready(self):
+        self.button.disabled = False
+        self.button.text = "Next  ▶  Event / Quote"
+        self.button.background_color = (0.18, 0.53, 0.93, 1)
+
     def load_event_image(self, index):
         """Load and display image for the current event with forced fresh download"""
+        self._set_button_loading()
+
         def download_image():
             if index >= len(self.events):
+                self._set_button_ready()
                 return
-            
+
             event = self.events[index]
             keyword = event["keyword"]
-            
-            cache_path = self.get_cached_image_path(keyword)
+
+            cache_path = self.get_cached_image_path()
             if os.path.exists(cache_path):
                 try:
                     os.remove(cache_path)
-                except Exception as remove_error:
+                except Exception:
                     pass
             
             try:
@@ -360,21 +364,20 @@ class FunApp(App):
                         req = urllib.request.Request(image_url, headers=headers)
                         with urllib.request.urlopen(req, timeout=10) as response:
                             image_data = response.read()
-                            
+
                             # Save to cache for the current session
                             with open(cache_path, 'wb') as f:
                                 f.write(image_data)
-                            
+
                             self.update_image_ui(cache_path)
                             return
                     except Exception as retry_error:
                         if attempt < max_retries - 1:
-                            import time
-                            time.sleep(1)  # Wait before retry
+                            time.sleep(1)
                 
                 # All retries failed
                 self.update_image_ui(None)
-                
+
             except Exception as e:
                 self.update_image_ui(None)
         
@@ -386,41 +389,44 @@ class FunApp(App):
     def update_image_ui(self, image_path):
         """Update the image widget"""
         if image_path and os.path.exists(image_path):
+            self.image.source = ''
             self.image.source = image_path
             self.image.reload()
         else:
-            # Use a high-quality fallback URL
             fallback_url = "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&h=600&fit=crop"
             self.image.source = fallback_url
+        self._set_button_ready()
     
     def show_next_event(self, instance):
-        """Cycle to next event or next quote"""
+        """Cycle to next event or next quote, always fetching a fresh image"""
         if not self.events:
             return
-            
-        # First, show all quotes for current event
+
         if self.current_event_index < len(self.events):
             event = self.events[self.current_event_index]
             current_quote = self.quote_label.text
             quotes = event["quotes"]
-            
+
             # Find next quote
             try:
                 current_index = quotes.index(current_quote)
                 next_index = (current_index + 1) % len(quotes)
-            except:
+            except ValueError:
+                current_index = -1
                 next_index = 0
-            
+
             if next_index == 0 and current_index == len(quotes) - 1:
-                # Move to next event
+                # Advance to next event
                 self.current_event_index = (self.current_event_index + 1) % len(self.events)
                 event = self.events[self.current_event_index]
                 self.event_title.text = event["name"]
                 self.quote_label.text = random.choice(event["quotes"])
-                self.load_event_image(self.current_event_index)
             else:
-                # Just change quote in current event
+                # Stay on current event, advance quote
                 self.quote_label.text = quotes[next_index]
+
+            # Always fetch a fresh image for the now-current event
+            self.load_event_image(self.current_event_index)
 
 if __name__ == '__main__':
     FunApp().run()
