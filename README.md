@@ -1,164 +1,198 @@
-# Daily Events & Quote App (Android Morning)
+# Daily Quote Generator
 
-An Android app that fetches images from the web for events, holidays, and birthdays based on the current date, and displays them with inspiring quotes.
+A Kivy app that shows date-based events, a related image, and rotating quotes. The app is configured for portrait orientation in Android builds and can also run as a desktop Python application.
 
-## Features
+## What the Current Code Does
 
-- **Date-Based Events**: Automatically detects today's date and fetches relevant historical events from Wikipedia
-- **Holiday & Birthday Support**: Displays special events like Christmas, New Year, Valentine's Day, Halloween, and personal birthdays
-- **Dynamic Image Fetching**: Retrieves relevant images from Pexels API based on event keywords
-- **Inspiring Quotes**: Shows rotating quotes related to each event
-- **Navigation**: Cycle through multiple events and quotes for the day
-- **Offline Fallback**: Works with cached data if internet unavailable
-- **Portrait Mode**: Optimized for mobile viewing
+On startup, the app builds a simple vertical layout with:
 
-## How It Works
+- An event title label
+- An image area
+- A quote label
+- A `Next Event / Quote` button
 
-1. **Event Detection**: On app launch, it queries Wikipedia's "On this day" API to fetch historical events for today's date
-2. **Image Matching**: Extracts keywords from each event and fetches corresponding images
-3. **Quote Generation**: Creates relevant quotes for each event
-4. **Interactive Display**: Users can tap "Next Event / Quote" to cycle through all events and their associated quotes
+It then loads content in the background using the current local date.
 
-## Running on PC
+## Event Sources
 
-To run the app on your computer:
+The app collects events from two places:
 
-1. Install dependencies: `pip install kivy pillow requests`
-2. Run: `python main.py`
+1. A built-in `SPECIAL_EVENTS` dictionary in `main.py`
+2. Wikipedia's "On this day" events API
 
-A window will open displaying today's events with images and quotes. Click "Next Event / Quote" to navigate through the day's events.
+The built-in holidays currently include:
 
-## Dependencies
+- New Year's Day
+- Valentine's Day
+- International Women's Day
+- St. Patrick's Day
+- Earth Day
+- International Labor Day
+- Independence Day
+- Halloween
+- Christmas
 
-- **Python 3.7+**
-- **Kivy** - UI framework
-- **Pillow** - Image processing
-- **Requests** - HTTP library (optional, urllib used as fallback)
-- **Internet connection** - Required for:
-  - Fetching historical events from Wikipedia API
-  - Downloading images from Pexels
-  - Fetching quotes from Quotable API (quotable.io)
+If today's date matches one of those entries, the app adds that holiday first.
 
-## External APIs Used
+It then tries to fetch up to 5 historical events from:
 
-1. **Wikipedia "On this day"** - `https://en.wikipedia.org/api/rest_v1/feed/onthisday/`
-   - Historical events for any date
-   - No authentication required
+`https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/<month>/<day>`
 
-2. **Quotable API** - `https://api.quotable.io/`
-   - Random inspirational quotes
-   - Quote filtering by length and tags
-   - No authentication required
+For each Wikipedia event, the app:
 
-3. **Google Images Search** - `https://www.google.com/search?tbm=isch&q=`
-   - Uses Google image search results for event keywords
-   - No API key required for basic usage
-   - Uses a browser-style User-Agent for better access
-   - Falls back to curated high-quality image URLs if Google search is blocked
+- Builds a short display name from the event text
+- Extracts up to 3 keywords from the event description
+- Fetches 3 quotes for that event
 
-4. **Fallback Image Sources**
-   - Curated high-quality image URLs for when Unsplash search unavailable
-   - Default celebration image as ultimate fallback
+If event loading fails completely, the app falls back to generic built-in events.
 
-## Features in Detail
+## Quote Behavior
 
-### Event Sources
-1. **Wikipedia "On this day"** - Fetches historical events for the current date
-2. **Built-in Holidays Database** - Pre-configured holidays (New Year, Valentine's Day, Christmas, Halloween, etc.)
-3. **Fallback Events** - If APIs are unavailable, shows generic celebratory content
+Quotes are fetched from the Quotable API:
 
-### Image Management
-- **High-quality image fetching** from Unsplash (1200x800 resolution)
-- **Smart keyword-based search** - Searches for images matching event keywords
-- **Intelligent caching** - Stores downloaded images locally to save bandwidth
-- **Fallback system** - Uses curated high-quality images if search fails
-- **Automatic retry** - Retries failed downloads up to 3 times
-- **Better user experience** - No re-downloading same images, faster load times
+`https://api.quotable.io/random?minLength=50&maxLength=150`
 
-### Quote System
-- **Real quotes from Quotable API** - Fetches authentic quotes from quotable.io
-- Displays 3 different quotes per event, fetched dynamically
-- Includes author attribution for each quote
-- Graceful fallback to pre-configured quotes if API is unavailable
-- Updates quotes automatically as user navigates through events
+For each event, the app attempts to fetch 3 quotes. Each successful quote is stored in the form:
 
-## Building for Android
+`"<quote>" - <author>`
 
-Building Kivy apps for Android requires Linux tools. Since you're on Windows, you'll need to use Windows Subsystem for Linux (WSL).
+If quote requests fail, the app uses a small built-in fallback quote list.
 
-### Prerequisites
-- Windows 11 or Windows 10 (with WSL 2)
-- At least 15GB free space (for Android SDK/NDK)
-- 30 minutes for initial setup
+## Image Behavior
 
-### Steps to set up WSL and build:
+Images are loaded per event keyword.
 
-1. **Install WSL**:
-   - Open PowerShell as Administrator
-   - Run: `wsl --install`
-   - Restart your computer if prompted
+The current code tries image sources in this order:
 
-2. **Set up the build environment in WSL**:
-   - Open WSL terminal: `wsl`
-   - Update packages: `sudo apt update && sudo apt upgrade -y`
-   - Install dependencies:
-     ```bash
-     sudo apt install -y python3 python3-pip openjdk-11-jdk git
-     pip3 install kivy buildozer cython
-     ```
+1. Google Images search HTML results for the keyword
+2. A built-in dictionary of curated Unsplash image URLs
+3. A default Unsplash celebration image
 
-3. **Copy project to WSL**:
-   - `cd ~`
-   - Create project directory: `mkdir projects`
-   - Copy: `cp -r /mnt/c/Users/slim7/Documents/GitHub/android-morning projects/`
-   - Navigate: `cd projects/android-morning`
+The image lookup is implemented by scraping the Google Images results page for a direct image URL. There is no Pexels integration in the current code.
 
-4. **Build the APK**:
-   - Initialize buildozer: `buildozer init` (if needed)
-   - Build: `buildozer android debug`
-   - First build takes 20-30 minutes (downloads Android SDK/NDK)
-   - APK location: `bin/dailyquote-0.1-debug.apk`
+## Caching Behavior
 
-5. **Install on Android device**:
-   - Enable USB Debugging on your Android phone
-   - Connect phone via USB
-   - Run: `adb install bin/dailyquote-0.1-debug.apk`
+Images are saved under the `dataset/` folder using an MD5 hash of the keyword, for example:
 
-## Image Caching
+`dataset/image_<hash>.jpg`
 
-The app uses keyword-based image caching in the `dataset/` folder, but it clears old cached files before each fresh download. This means:
-- First app launch loads images from the web
-- Each run forces a fresh image fetch for the current event keywords
-- Cache only stores the latest fetched file for convenience
-- You can delete the `dataset/` folder anytime to force a full refresh
+However, the current implementation deletes any existing cached file for that keyword before downloading a fresh copy. In practice, this means:
 
-## Network & Performance
+- The app writes images to `dataset/`
+- The cache is not reused across loads for the same keyword
+- The code prefers a fresh download each time an event image is loaded
 
-### Network Requirements
-The app works best with:
-- **Good internet connection** - For first launch and API calls
-- **Offline support** - Falls back to cached images if internet unavailable
-- **Timeout handling** - API calls have 5-10 second timeouts to prevent app freezing
+## Navigation Behavior
 
-### Performance Tips
-1. **First Launch**: Allow ~30 seconds for initial image/quote downloads
-2. **Subsequent Launches**: Images load from cache (instant)
-3. **Quotes**: Refreshed on each app launch for variety
-4. **Images**: Reused if keyword matches previous event (via caching)
+The `Next Event / Quote` button cycles through quotes first, then moves to the next event.
 
-## Troubleshooting
+For a given event:
 
-### Images Not Loading
-- Check your internet connection
-- Try deleting `dataset/` folder and restarting the app
-- Check if Unsplash API is accessible from your location
+- The app shows one quote initially
+- Repeated button presses advance through the event's quote list
+- After the last quote, the app moves to the next event and loads its image
+- When it reaches the end of the event list, it wraps back to the first event
 
-### Quotes Not Appearing
-- Verify internet connection
-- The Quotable API requires outbound HTTPS connections
-- Fallback generic quotes will display if API unavailable
+## Threading
 
-### App Freezing
-- This shouldn't happen due to background threading
-- All network operations run in separate threads
-- If it does freeze, close and reopen the app
+Network work runs in background threads:
+
+- Event loading runs in a daemon thread
+- Image downloading runs in a daemon thread
+
+UI updates are pushed back to the main Kivy thread using `@mainthread`.
+
+## Desktop Run
+
+The app can be run directly with Python.
+
+### Requirements
+
+- Python 3
+- Kivy
+
+The Buildozer config currently lists these Android/package requirements:
+
+- `python3`
+- `kivy`
+- `pillow`
+- `requests`
+
+The main application code itself currently imports Kivy and Python standard-library modules such as `urllib`, `json`, `threading`, and `hashlib`.
+
+### Run Command
+
+```bash
+python main.py
+```
+
+If Kivy is not installed yet:
+
+```bash
+pip install kivy
+```
+
+## Android Build Configuration
+
+The existing `buildozer.spec` is configured as follows:
+
+- Title: `Daily Quote Generator`
+- Package name: `dailyquote`
+- Version: `0.1`
+- Orientation: `portrait`
+- Permission: `INTERNET`
+
+Buildozer-based Android builds require Linux tooling. On Windows, use WSL.
+
+## Build on Windows with WSL
+
+1. Install WSL from an elevated PowerShell:
+
+   ```powershell
+   wsl --install
+   ```
+
+2. Open your Linux shell and install basic tooling:
+
+   ```bash
+   sudo apt update
+   sudo apt install -y python3 python3-pip openjdk-11-jdk git
+   pip3 install buildozer cython
+   ```
+
+3. Copy the project into the Linux filesystem and build:
+
+   ```bash
+   mkdir -p ~/projects
+   cp -r /mnt/c/Users/slim7/Documents/GitHub/android-morning ~/projects/
+   cd ~/projects/android-morning
+   buildozer android debug
+   ```
+
+4. The generated APK should be created under:
+
+   ```text
+   bin/dailyquote-0.1-debug.apk
+   ```
+
+## External Services Used
+
+- Wikipedia "On this day" API for historical events
+- Quotable API for quotes
+- Google Images search page for image discovery
+- Unsplash image URLs as curated fallbacks
+
+None of these services require API keys in the current code.
+
+## Failure and Fallback Behavior
+
+- If Wikipedia loading fails, the app falls back to generic built-in events
+- If quote loading fails, the app falls back to built-in quotes
+- If image download fails after 3 retries, the image widget is pointed at a fallback Unsplash URL
+
+## Notes About the Current Implementation
+
+- The code does not include birthdays
+- The code does not use Pexels
+- The code does not currently provide a true offline image mode
+- The code includes a `generate_quotes_for_event()` method that is not used by the current event-loading flow
