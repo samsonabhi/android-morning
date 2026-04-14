@@ -11,11 +11,39 @@ import threading
 import urllib.request
 import urllib.error
 import json
-import urllib.parse
 import re
 import time
 import shutil
 
+
+# Curated fallback images indexed by keyword fragment
+_FALLBACK_IMAGES = {
+    "celebration": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop",
+    "christmas":   "https://images.unsplash.com/photo-1543269865-cbdf26effbad?w=1200&h=800&fit=crop",
+    "new year":    "https://images.unsplash.com/photo-1504434318773-77635a50b0f1?w=1200&h=800&fit=crop",
+    "valentine":   "https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=1200&h=800&fit=crop",
+    "love":        "https://images.unsplash.com/photo-1518231557733-0c6f47ad1b44?w=1200&h=800&fit=crop",
+    "holiday":     "https://images.unsplash.com/photo-1511632765486-a01980e01a18?w=1200&h=800&fit=crop",
+    "halloween":   "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
+    "pumpkin":     "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
+    "fireworks":   "https://images.unsplash.com/photo-1504382216647-33e28496e0cd?w=1200&h=800&fit=crop",
+    "nature":      "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop",
+    "earth":       "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop",
+    "history":     "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?w=1200&h=800&fit=crop",
+    "book":        "https://images.unsplash.com/photo-1507842217343-583f20270319?w=1200&h=800&fit=crop",
+    "women":       "https://images.unsplash.com/photo-1524503033411-c9566986fc8f?w=1200&h=800&fit=crop",
+    "workers":     "https://images.unsplash.com/photo-1504376830547-506dedfe681a?w=1200&h=800&fit=crop",
+    "america":     "https://images.unsplash.com/photo-1501466044931-62695aada8e9?w=1200&h=800&fit=crop",
+    "irish":       "https://images.unsplash.com/photo-1615478503562-ec2d8aa0e24e?w=1200&h=800&fit=crop",
+}
+_DEFAULT_IMAGE = "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?w=1200&h=800&fit=crop"
+
+def _fallback_image_for(keyword):
+    kw = (keyword or "").lower()
+    for key, url in _FALLBACK_IMAGES.items():
+        if key in kw:
+            return url
+    return _DEFAULT_IMAGE
 
 # Holiday and special events database
 SPECIAL_EVENTS = {
@@ -71,7 +99,7 @@ class FunApp(App):
         
         # Button
         self.button = Button(
-            text="Next  ▶  Event / Quote",
+            text="Click for fun  ▶",
             font_size=20,
             bold=True,
             size_hint=(1, 0.1),
@@ -114,10 +142,12 @@ class FunApp(App):
                 # Check for special holidays/events today
                 if (month, day) in SPECIAL_EVENTS:
                     special_event = SPECIAL_EVENTS[(month, day)]
+                    keyword = random.choice(special_event["keywords"])
                     quotes = self.fetch_multiple_quotes(3)
                     events.append({
                         "name": special_event["name"],
-                        "keyword": random.choice(special_event["keywords"]),
+                        "keyword": keyword,
+                        "image_url": _fallback_image_for(keyword),
                         "quotes": quotes
                     })
                 
@@ -138,21 +168,36 @@ class FunApp(App):
                         for event in data.get('events', [])[:5]:  # Limit to 5 events
                             year = event.get('year', 'Unknown')
                             text = event.get('text', '')
-                            
+
                             # Extract event name from the first sentence
                             event_name = text.split('.')[0] if '.' in text else text
                             if len(event_name) > 100:
                                 event_name = event_name[:97] + "..."
-                            
+
                             # Create keyword from event text
                             keyword = self.extract_keyword(text)
-                            
+
+                            # Use Wikipedia page image if available — skip gifs and svgs
+                            image_url = None
+                            for page in event.get('pages', []):
+                                # Prefer originalimage, fall back to thumbnail
+                                for key in ('originalimage', 'thumbnail'):
+                                    src = page.get(key, {}).get('source', '')
+                                    if src and not src.lower().endswith(('.gif', '.svg', '.svg.png')):
+                                        image_url = src
+                                        break
+                                if image_url:
+                                    break
+                            if not image_url:
+                                image_url = _fallback_image_for(keyword)
+
                             # Fetch real quotes for this event
                             quotes = self.fetch_multiple_quotes(3)
-                            
+
                             events.append({
                                 "name": f"{year}: {event_name}",
                                 "keyword": keyword,
+                                "image_url": image_url,
                                 "quotes": quotes
                             })
                 except Exception as wiki_error:
@@ -163,6 +208,7 @@ class FunApp(App):
                     events = [{
                         "name": f"April {day}, {now.year}",
                         "keyword": "celebration happiness",
+                        "image_url": _DEFAULT_IMAGE,
                         "quotes": [
                             "Every day is a new opportunity!",
                             "Make today amazing!",
@@ -183,6 +229,7 @@ class FunApp(App):
                     {
                         "name": f"April {now.day}, {now.year}",
                         "keyword": "celebration happiness joy",
+                        "image_url": _DEFAULT_IMAGE,
                         "quotes": [
                             "Every day brings new possibilities!",
                             "Make today count!",
@@ -192,6 +239,7 @@ class FunApp(App):
                     {
                         "name": "Historical Moment",
                         "keyword": "history learning wisdom",
+                        "image_url": _fallback_image_for("history"),
                         "quotes": [
                             "History teaches us valuable lessons!",
                             "Learn from the past to shape the future!",
@@ -266,57 +314,13 @@ class FunApp(App):
             self.quote_label.text = random.choice(event["quotes"])
             self.load_event_image(index)
     
-    def get_cached_image_path(self):
-        """Return the single reused image path (keeps dataset folder to one file)"""
+    def get_cached_image_path(self, index):
+        """Return a per-event image path so Kivy never serves a stale cached texture"""
         dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
         if not os.path.exists(dataset_dir):
             os.makedirs(dataset_dir)
-        return os.path.join(dataset_dir, 'current.jpg')
-    
-    def get_high_quality_image_url(self, keyword):
-        """Get high quality image URL using Google Image search or fallback sources"""
-        search_keywords = urllib.parse.quote_plus(keyword or "celebration")
-        try:
-            # Use Google Images search page to find a relevant image URL
-            url = f"https://www.google.com/search?tbm=isch&q={search_keywords}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9'
-            }
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as response:
-                html = response.read().decode('utf-8', errors='ignore')
-                matches = re.findall(r'https://[^\"\']+?\.(?:jpg|jpeg|png|webp|gif)', html)
-                if matches:
-                    image_url = matches[0]
-                    return image_url
-        except Exception as e:
-            pass
+        return os.path.join(dataset_dir, f'event_{index}.jpg')
 
-        # Fallback: Use curated high-quality image sources
-        high_quality_sources = {
-            "celebration": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop",
-            "christmas": "https://images.unsplash.com/photo-1543269865-cbdf26effbad?w=1200&h=800&fit=crop",
-            "new year": "https://images.unsplash.com/photo-1504434318773-77635a50b0f1?w=1200&h=800&fit=crop",
-            "valentine": "https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=1200&h=800&fit=crop",
-            "love": "https://images.unsplash.com/photo-1518231557733-0c6f47ad1b44?w=1200&h=800&fit=crop",
-            "holiday": "https://images.unsplash.com/photo-1511632765486-a01980e01a18?w=1200&h=800&fit=crop",
-            "pumpkin": "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
-            "halloween": "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
-            "sparkle": "https://images.unsplash.com/photo-1442512595331-e89e6f47dba6?w=1200&h=800&fit=crop",
-            "fireworks": "https://images.unsplash.com/photo-1504382216647-33e28496e0cd?w=1200&h=800&fit=crop",
-            "history": "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?w=1200&h=800&fit=crop",
-            "book": "https://images.unsplash.com/photo-1507842217343-583f20270319?w=1200&h=800&fit=crop",
-            "learning": "https://images.unsplash.com/photo-1524534694827-239e0b79be1d?w=1200&h=800&fit=crop",
-            "nature": "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop",
-            "earth": "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop"
-        }
-        for key, url in high_quality_sources.items():
-            if key in keyword.lower():
-                return url
-
-        return "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop"
-    
     @mainthread
     def _set_button_loading(self):
         self.button.disabled = True
@@ -327,11 +331,11 @@ class FunApp(App):
     @mainthread
     def _set_button_ready(self):
         self.button.disabled = False
-        self.button.text = "Next  ▶  Event / Quote"
+        self.button.text = "Click for fun  ▶"
         self.button.background_color = (0.18, 0.53, 0.93, 1)
 
     def load_event_image(self, index):
-        """Load and display image for the current event with forced fresh download"""
+        """Download and display the image stored in the event dict"""
         self._set_button_loading()
 
         def download_image():
@@ -339,62 +343,59 @@ class FunApp(App):
                 self._set_button_ready()
                 return
 
-            event = self.events[index]
-            keyword = event["keyword"]
+            image_url = self.events[index].get("image_url", _DEFAULT_IMAGE)
+            cache_path = self.get_cached_image_path(index)
 
-            cache_path = self.get_cached_image_path()
+            # Use cached file if it already exists for this event
             if os.path.exists(cache_path):
+                self.update_image_ui(cache_path)
+                return
+
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            for attempt in range(3):
                 try:
-                    os.remove(cache_path)
+                    req = urllib.request.Request(image_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        data = response.read()
+                    # Verify it's a valid image (JPEG/PNG magic bytes)
+                    if data[:3] == b'\xff\xd8\xff' or data[:8] == b'\x89PNG\r\n\x1a\n':
+                        with open(cache_path, 'wb') as f:
+                            f.write(data)
+                        self.update_image_ui(cache_path)
+                        return
+                    else:
+                        # Not a valid image — fall through to fallback
+                        break
                 except Exception:
-                    pass
-            
+                    if attempt < 2:
+                        time.sleep(1)
+
+            # URL failed or returned non-image — use curated fallback
+            keyword = self.events[index].get('keyword', '')
+            fallback_url = _fallback_image_for(keyword)
             try:
-                # Get high quality image
-                image_url = self.get_high_quality_image_url(keyword)
-                
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                
-                # Retry logic
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        req = urllib.request.Request(image_url, headers=headers)
-                        with urllib.request.urlopen(req, timeout=10) as response:
-                            image_data = response.read()
-
-                            # Save to cache for the current session
-                            with open(cache_path, 'wb') as f:
-                                f.write(image_data)
-
-                            self.update_image_ui(cache_path)
-                            return
-                    except Exception as retry_error:
-                        if attempt < max_retries - 1:
-                            time.sleep(1)
-                
-                # All retries failed
+                req = urllib.request.Request(fallback_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    with open(cache_path, 'wb') as f:
+                        f.write(response.read())
+                self.update_image_ui(cache_path)
+            except Exception:
                 self.update_image_ui(None)
 
-            except Exception as e:
-                self.update_image_ui(None)
-        
-        # Run download in background thread
-        thread = threading.Thread(target=download_image, daemon=True)
-        thread.start()
-    
+        threading.Thread(target=download_image, daemon=True).start()
+
     @mainthread
     def update_image_ui(self, image_path):
-        """Update the image widget"""
+        """Update the image widget, bypassing Kivy's texture cache"""
+        from kivy.cache import Cache
         if image_path and os.path.exists(image_path):
+            Cache.remove('kv.image', image_path)
+            Cache.remove('kv.texture', image_path)
             self.image.source = ''
             self.image.source = image_path
             self.image.reload()
         else:
-            fallback_url = "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&h=600&fit=crop"
-            self.image.source = fallback_url
+            self.image.source = _DEFAULT_IMAGE
         self._set_button_ready()
     
     def show_next_event(self, instance):

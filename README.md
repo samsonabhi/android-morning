@@ -1,198 +1,118 @@
 # Daily Quote Generator
 
-A Kivy app that shows date-based events, a related image, and rotating quotes. The app is configured for portrait orientation in Android builds and can also run as a desktop Python application.
+A Kivy app that shows historical events for today's date, each with a relevant image and rotating quotes. Runs on desktop (Windows/macOS/Linux) and builds to Android via Buildozer.
 
-## What the Current Code Does
+## How It Works
 
-On startup, the app builds a simple vertical layout with:
+On launch the app:
 
-- An event title label
-- An image area
-- A quote label
-- A `Next Event / Quote` button
+1. Wipes the `dataset/` folder to start fresh
+2. Checks today's date against a built-in holidays database
+3. Fetches up to 5 historical events from Wikipedia's "On this day" API
+4. For each event, resolves an image URL from the Wikipedia article and fetches 3 quotes from ZenQuotes
+5. Displays the first event — title, image, and quote
+6. Pressing **Click for fun ▶** cycles through quotes for the current event; on the last quote it advances to the next event and loads a new image
 
-It then loads content in the background using the current local date.
+All network work runs in background threads. The button disables itself and shows **"Loading image…"** while a download is in progress.
+
+When the app closes `dataset/` is wiped again.
 
 ## Event Sources
 
-The app collects events from two places:
+Events are loaded from two places:
 
-1. A built-in `SPECIAL_EVENTS` dictionary in `main.py`
-2. Wikipedia's "On this day" events API
+**Built-in holidays** (checked first):
 
-The built-in holidays currently include:
+| Date | Event |
+|------|-------|
+| Jan 1 | New Year's Day |
+| Feb 14 | Valentine's Day |
+| Mar 8 | International Women's Day |
+| Mar 17 | St. Patrick's Day |
+| Apr 22 | Earth Day |
+| May 1 | International Labor Day |
+| Jul 4 | Independence Day |
+| Oct 31 | Halloween |
+| Dec 25 | Christmas |
 
-- New Year's Day
-- Valentine's Day
-- International Women's Day
-- St. Patrick's Day
-- Earth Day
-- International Labor Day
-- Independence Day
-- Halloween
-- Christmas
+**Wikipedia "On this day"** — up to 5 events fetched from:
 
-If today's date matches one of those entries, the app adds that holiday first.
-
-It then tries to fetch up to 5 historical events from:
-
-`https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/<month>/<day>`
-
-For each Wikipedia event, the app:
-
-- Builds a short display name from the event text
-- Extracts up to 3 keywords from the event description
-- Fetches 3 quotes for that event
-
-If event loading fails completely, the app falls back to generic built-in events.
-
-## Quote Behavior
-
-Quotes are fetched from the Quotable API:
-
-`https://api.quotable.io/random?minLength=50&maxLength=150`
-
-For each event, the app attempts to fetch 3 quotes. Each successful quote is stored in the form:
-
-`"<quote>" - <author>`
-
-If quote requests fail, the app uses a small built-in fallback quote list.
-
-## Image Behavior
-
-Images are loaded per event keyword.
-
-The current code tries image sources in this order:
-
-1. Google Images search HTML results for the keyword
-2. A built-in dictionary of curated Unsplash image URLs
-3. A default Unsplash celebration image
-
-The image lookup is implemented by scraping the Google Images results page for a direct image URL. There is no Pexels integration in the current code.
-
-## Caching Behavior
-
-Images are saved under the `dataset/` folder using an MD5 hash of the keyword, for example:
-
-`dataset/image_<hash>.jpg`
-
-However, the current implementation deletes any existing cached file for that keyword before downloading a fresh copy. In practice, this means:
-
-- The app writes images to `dataset/`
-- The cache is not reused across loads for the same keyword
-- The code prefers a fresh download each time an event image is loaded
-
-## Navigation Behavior
-
-The `Next Event / Quote` button cycles through quotes first, then moves to the next event.
-
-For a given event:
-
-- The app shows one quote initially
-- Repeated button presses advance through the event's quote list
-- After the last quote, the app moves to the next event and loads its image
-- When it reaches the end of the event list, it wraps back to the first event
-
-## Threading
-
-Network work runs in background threads:
-
-- Event loading runs in a daemon thread
-- Image downloading runs in a daemon thread
-
-UI updates are pushed back to the main Kivy thread using `@mainthread`.
-
-## Desktop Run
-
-The app can be run directly with Python.
-
-### Requirements
-
-- Python 3
-- Kivy
-
-The Buildozer config currently lists these Android/package requirements:
-
-- `python3`
-- `kivy`
-- `pillow`
-- `requests`
-
-The main application code itself currently imports Kivy and Python standard-library modules such as `urllib`, `json`, `threading`, and `hashlib`.
-
-### Run Command
-
-```bash
-python main.py
+```
+https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/<MM>/<DD>
 ```
 
-If Kivy is not installed yet:
+No API key required.
+
+## Image Sources
+
+For Wikipedia events, the app uses the `originalimage` from the first Wikipedia page attached to the event, falling back to `thumbnail` if no original is available. `.gif` and `.svg` files are skipped as Kivy cannot display them.
+
+If no usable Wikipedia image is found, the app falls back to a curated Unsplash image matched by event keyword (e.g. "halloween" → pumpkin photo, "fireworks" → fireworks photo).
+
+Each event's image is saved to `dataset/event_<N>.jpg` during the session. Returning to a previously viewed event reuses the saved file. The folder is capped to one file per event and is wiped on open and close.
+
+## Quote Source
+
+Quotes are fetched once per session from ZenQuotes:
+
+```
+https://zenquotes.io/api/quotes
+```
+
+The full response (50+ quotes) is cached in memory and sampled randomly for each event. If the request fails, a small set of built-in fallback quotes is used. No API key required.
+
+## Running on Desktop
 
 ```bash
 pip install kivy
+python main.py
 ```
 
-## Android Build Configuration
+## Android Build
 
-The existing `buildozer.spec` is configured as follows:
+Requires Linux tooling. On Windows use WSL.
 
-- Title: `Daily Quote Generator`
-- Package name: `dailyquote`
-- Version: `0.1`
-- Orientation: `portrait`
-- Permission: `INTERNET`
+```powershell
+wsl --install
+```
 
-Buildozer-based Android builds require Linux tooling. On Windows, use WSL.
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip openjdk-11-jdk git
+pip3 install buildozer cython
+```
 
-## Build on Windows with WSL
+Copy the project and build:
 
-1. Install WSL from an elevated PowerShell:
+```bash
+cp -r /mnt/c/Users/slim7/Documents/GitHub/android-morning ~/projects/
+cd ~/projects/android-morning
+buildozer android debug
+```
 
-   ```powershell
-   wsl --install
-   ```
+Output APK: `bin/dailyquote-0.1-debug.apk`
 
-2. Open your Linux shell and install basic tooling:
+Install on a connected device with USB Debugging enabled:
 
-   ```bash
-   sudo apt update
-   sudo apt install -y python3 python3-pip openjdk-11-jdk git
-   pip3 install buildozer cython
-   ```
+```bash
+adb install bin/dailyquote-0.1-debug.apk
+```
 
-3. Copy the project into the Linux filesystem and build:
+### Buildozer config summary
 
-   ```bash
-   mkdir -p ~/projects
-   cp -r /mnt/c/Users/slim7/Documents/GitHub/android-morning ~/projects/
-   cd ~/projects/android-morning
-   buildozer android debug
-   ```
+| Setting | Value |
+|---------|-------|
+| Title | Daily Quote Generator |
+| Package | `dailyquote` |
+| Version | 0.1 |
+| Orientation | portrait |
+| Permission | `INTERNET` |
+| Requirements | `python3, kivy, pillow, requests` |
 
-4. The generated APK should be created under:
+## Troubleshooting
 
-   ```text
-   bin/dailyquote-0.1-debug.apk
-   ```
+**Image stays blank** — The Wikipedia image failed validation (not a JPEG/PNG) and the curated fallback also failed. Check your internet connection.
 
-## External Services Used
+**Quotes not showing** — ZenQuotes request failed; built-in fallback quotes will display instead.
 
-- Wikipedia "On this day" API for historical events
-- Quotable API for quotes
-- Google Images search page for image discovery
-- Unsplash image URLs as curated fallbacks
-
-None of these services require API keys in the current code.
-
-## Failure and Fallback Behavior
-
-- If Wikipedia loading fails, the app falls back to generic built-in events
-- If quote loading fails, the app falls back to built-in quotes
-- If image download fails after 3 retries, the image widget is pointed at a fallback Unsplash URL
-
-## Notes About the Current Implementation
-
-- The code does not include birthdays
-- The code does not use Pexels
-- The code does not currently provide a true offline image mode
-- The code includes a `generate_quotes_for_event()` method that is not used by the current event-loading flow
+**Button stays grey** — A download thread is still running. It will re-enable automatically when done or after 3 retries (~15 s maximum).
