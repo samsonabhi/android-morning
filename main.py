@@ -12,6 +12,22 @@ import urllib.request
 import urllib.error
 import json
 import urllib.parse
+import hashlib
+import re
+
+
+# Holiday and special events database
+SPECIAL_EVENTS = {
+    (1, 1): {"name": "New Year's Day", "keywords": ["new year", "celebration", "fireworks", "party"]},
+    (2, 14): {"name": "Valentine's Day", "keywords": ["love", "romance", "hearts", "flowers"]},
+    (3, 8): {"name": "International Women's Day", "keywords": ["women", "celebration", "empowerment"]},
+    (3, 17): {"name": "St. Patrick's Day", "keywords": ["celebration", "green", "irish"]},
+    (4, 22): {"name": "Earth Day", "keywords": ["nature", "earth", "green", "environment"]},
+    (5, 1): {"name": "International Labor Day", "keywords": ["workers", "celebration", "unity"]},
+    (7, 4): {"name": "Independence Day", "keywords": ["celebration", "fireworks", "america"]},
+    (10, 31): {"name": "Halloween", "keywords": ["pumpkin", "spooky", "costume"]},
+    (12, 25): {"name": "Christmas", "keywords": ["christmas", "celebration", "holiday", "festive"]},
+}
 
 class FunApp(App):
     def build(self):
@@ -67,66 +83,81 @@ class FunApp(App):
         return self.layout
     
     def load_today_events(self):
-        """Load today's events from Wikipedia 'On this day'"""
+        """Load today's events from Wikipedia 'On this day' and special events"""
         def fetch_events():
             try:
                 now = datetime.now()
-                month = now.strftime('%B').lower()
+                month = now.month
                 day = now.day
                 
-                # Wikipedia "On this day" API
-                url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month}/{day}"
+                events = []
                 
-                headers = {
-                    'User-Agent': 'DailyEventsApp/1.0 (learning@project.com)'
-                }
+                # Check for special holidays/events today
+                if (month, day) in SPECIAL_EVENTS:
+                    special_event = SPECIAL_EVENTS[(month, day)]
+                    quotes = self.fetch_multiple_quotes(3)
+                    events.append({
+                        "name": special_event["name"],
+                        "keyword": random.choice(special_event["keywords"]),
+                        "quotes": quotes
+                    })
                 
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    data = json.loads(response.read())
+                # Try to fetch Wikipedia events
+                try:
+                    month_name = now.strftime('%B').lower()
+                    url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month_name}/{day}"
                     
-                    events = []
-                    for event in data.get('events', [])[:5]:  # Limit to 5 events
-                        year = event.get('year', 'Unknown')
-                        text = event.get('text', '')
+                    headers = {
+                        'User-Agent': 'DailyEventsApp/1.0 (learning@project.com)'
+                    }
+                    
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        data = json.loads(response.read())
                         
-                        # Extract event name from text
-                        event_name = text.split('.')[0] if '.' in text else text[:50]
-                        if len(event_name) > 50:
-                            event_name = event_name[:47] + "..."
-                        
-                        # Create keyword from event text
-                        keyword = self.extract_keyword(text)
-                        
-                        # Generate quotes for this event
-                        quotes = self.generate_quotes_for_event(event_name, year)
-                        
-                        events.append({
-                            "name": f"{year}: {event_name}",
-                            "keyword": keyword,
-                            "quotes": quotes
-                        })
-                    
-                    if not events:
-                        # Fallback events
-                        events = [{
-                            "name": f"April {day}, {now.year}",
-                            "keyword": "celebration happiness",
-                            "quotes": [
-                                "Every day is a new opportunity!",
-                                "Make today amazing!",
-                                "Celebrate the gift of life!"
-                            ]
-                        }]
-                    
-                    self.events = events
-                    self.current_event_index = 0
-                    
-                    # Update UI with first event
-                    self.update_event_ui(0)
-                    
+                        for event in data.get('events', [])[:5]:  # Limit to 5 events
+                            year = event.get('year', 'Unknown')
+                            text = event.get('text', '')
+                            
+                            # Extract event name from text
+                            event_name = text.split('.')[0] if '.' in text else text[:50]
+                            if len(event_name) > 50:
+                                event_name = event_name[:47] + "..."
+                            
+                            # Create keyword from event text
+                            keyword = self.extract_keyword(text)
+                            
+                            # Fetch real quotes for this event
+                            quotes = self.fetch_multiple_quotes(3)
+                            
+                            events.append({
+                                "name": f"{year}: {event_name}",
+                                "keyword": keyword,
+                                "quotes": quotes
+                            })
+                except Exception as wiki_error:
+                    print(f"Wikipedia API error: {wiki_error}")
+                
+                if not events:
+                    # Fallback events
+                    events = [{
+                        "name": f"April {day}, {now.year}",
+                        "keyword": "celebration happiness",
+                        "quotes": [
+                            "Every day is a new opportunity!",
+                            "Make today amazing!",
+                            "Celebrate the gift of life!"
+                        ]
+                    }]
+                
+                self.events = events
+                self.current_event_index = 0
+                
+                # Update UI with first event
+                self.update_event_ui(0)
+                
             except Exception as e:
-                print(f"Error fetching events: {e}")
+                print(f"Error loading events: {e}")
                 # Fallback events
                 now = datetime.now()
                 self.events = [
@@ -158,16 +189,19 @@ class FunApp(App):
     
     def extract_keyword(self, text):
         """Extract relevant keywords from event text"""
-        # Simple keyword extraction
+        # Simple keyword extraction - filter for meaningful words
         words = text.lower().split()
         keywords = []
         
-        # Common event-related words
+        # Common event-related words to prioritize
         event_words = ['war', 'battle', 'born', 'died', 'discovered', 'invented', 
-                      'founded', 'launched', 'signed', 'peace', 'revolution']
+                      'founded', 'launched', 'signed', 'peace', 'revolution', 'election',
+                      'treaty', 'assassination', 'disaster']
         
         for word in words:
-            if word in event_words or len(word) > 4:
+            # Remove punctuation
+            word = word.strip('.,!?;:')
+            if (word in event_words or len(word) > 4) and word not in ['from', 'that', 'with', 'were', 'been']:
                 keywords.append(word)
         
         if keywords:
@@ -176,17 +210,65 @@ class FunApp(App):
             return 'historical event'
     
     def generate_quotes_for_event(self, event_name, year):
-        """Generate positive quotes related to the event"""
-        base_quotes = [
-            f"Celebrate the legacy of {event_name}!",
-            f"Remember the impact of events from {year}!",
-            f"History teaches us through moments like {event_name}!",
-            f"Every historical event shapes our future!",
-            f"Learn from the past, live in the present!"
+        """Fetch real quotes from Quotable API"""
+        # Fallback quotes for when API is unavailable
+        fallback_quotes = [
+            f"Every moment with {event_name} is precious!",
+            f"Celebrate the significance of {year} and today!",
+            f"Today reminds us of historical moments like {event_name}!"
         ]
         
-        # Return 3 random quotes
-        return random.sample(base_quotes, 3)
+        try:
+            # Fetch random quotes from Quotable API
+            url = "https://api.quotable.io/random?limit=3&minLength=50&maxLength=150"
+            headers = {'User-Agent': 'DailyEventsApp/1.0'}
+            
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read())
+                
+                if 'content' in data:
+                    quote = data['content']
+                    author = data.get('author', 'Unknown').replace(', type.author', '')
+                    return [f'"{quote}" - {author}']
+                    
+        except Exception as e:
+            print(f"Quote API error: {e}")
+        
+        return fallback_quotes
+    
+    def fetch_multiple_quotes(self, count=3):
+        """Fetch multiple quotes from API for an event"""
+        quotes = []
+        fallback_quotes = [
+            "Every day is a chance for greatness!",
+            "Embrace the present moment!",
+            "Life is a beautiful journey!",
+            "Make today count!",
+            "Celebrate the gift of existence!"
+        ]
+        
+        try:
+            for _ in range(count):
+                url = "https://api.quotable.io/random?minLength=50&maxLength=150"
+                headers = {'User-Agent': 'DailyEventsApp/1.0'}
+                
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = json.loads(response.read())
+                    
+                    if 'content' in data:
+                        quote = data['content']
+                        author = data.get('author', 'Unknown').replace(', type.author', '')
+                        quotes.append(f'"{quote}" - {author}')
+                    else:
+                        quotes.append(random.choice(fallback_quotes))
+            
+            return quotes if quotes else fallback_quotes
+            
+        except Exception as e:
+            print(f"Error fetching quotes: {e}")
+            return fallback_quotes
     
     @mainthread
     def update_event_ui(self, index):
@@ -197,60 +279,113 @@ class FunApp(App):
             self.quote_label.text = random.choice(event["quotes"])
             self.load_event_image(index)
     
+    def get_cached_image_path(self, keyword):
+        """Get cached image path based on keyword hash"""
+        keyword_hash = hashlib.md5(keyword.encode()).hexdigest()
+        output_path = "dataset"
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        return os.path.join(output_path, f"image_{keyword_hash}.jpg")
+    
+    def get_high_quality_image_url(self, keyword):
+        """Get high quality image URL using Google Image search or fallback sources"""
+        search_keywords = urllib.parse.quote_plus(keyword or "celebration")
+        try:
+            # Use Google Images search page to find a relevant image URL
+            url = f"https://www.google.com/search?tbm=isch&q={search_keywords}"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+                matches = re.findall(r'https://[^\"\']+?\.(?:jpg|jpeg|png|webp|gif)', html)
+                if matches:
+                    image_url = matches[0]
+                    print(f"Using Google Images result for '{keyword}'")
+                    return image_url
+        except Exception as e:
+            print(f"Google Images search error for '{keyword}': {e}")
+
+        # Fallback: Use curated high-quality image sources
+        high_quality_sources = {
+            "celebration": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop",
+            "christmas": "https://images.unsplash.com/photo-1543269865-cbdf26effbad?w=1200&h=800&fit=crop",
+            "new year": "https://images.unsplash.com/photo-1504434318773-77635a50b0f1?w=1200&h=800&fit=crop",
+            "valentine": "https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=1200&h=800&fit=crop",
+            "love": "https://images.unsplash.com/photo-1518231557733-0c6f47ad1b44?w=1200&h=800&fit=crop",
+            "holiday": "https://images.unsplash.com/photo-1511632765486-a01980e01a18?w=1200&h=800&fit=crop",
+            "pumpkin": "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
+            "halloween": "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
+            "sparkle": "https://images.unsplash.com/photo-1442512595331-e89e6f47dba6?w=1200&h=800&fit=crop",
+            "fireworks": "https://images.unsplash.com/photo-1504382216647-33e28496e0cd?w=1200&h=800&fit=crop",
+            "history": "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?w=1200&h=800&fit=crop",
+            "book": "https://images.unsplash.com/photo-1507842217343-583f20270319?w=1200&h=800&fit=crop",
+            "learning": "https://images.unsplash.com/photo-1524534694827-239e0b79be1d?w=1200&h=800&fit=crop",
+            "nature": "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop",
+            "earth": "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop"
+        }
+        for key, url in high_quality_sources.items():
+            if key in keyword.lower():
+                print(f"Using fallback image for '{keyword}'")
+                return url
+
+        print(f"Using default image for '{keyword}'")
+        return "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop"
+    
     def load_event_image(self, index):
-        """Load and display image for the current event"""
+        """Load and display image for the current event with forced fresh download"""
         def download_image():
             if index >= len(self.events):
                 return
-                
+            
             event = self.events[index]
             keyword = event["keyword"]
             
-            # For demo purposes, use reliable static images based on keywords
-            image_sources = {
-                "celebration happiness joy": "https://images.pexels.com/photos/1108099/pexels-photo-1108099.jpeg?w=400&h=200&fit=crop",
-                "history learning wisdom": "https://images.pexels.com/photos/159866/books-book-pages-read-literature-159866.jpeg?w=400&h=200&fit=crop",
-                "cute pets animals": "https://images.pexels.com/photos/1108099/pexels-photo-1108099.jpeg?w=400&h=200&fit=crop",
-                "siblings family love": "https://images.pexels.com/photos/1181690/pexels-photo-1181690.jpeg?w=400&h=200&fit=crop",
-                "Parkinson's awareness health": "https://images.pexels.com/photos/3807517/pexels-photo-3807517.jpeg?w=400&h=200&fit=crop",
-                "Christmas celebration holiday": "https://images.pexels.com/photos/4240471/pexels-photo-4240471.jpeg?w=400&h=200&fit=crop",
-                "New Year celebration fireworks": "https://images.pexels.com/photos/2331697/pexels-photo-2331697.jpeg?w=400&h=200&fit=crop",
-                "Valentine's Day love romance": "https://images.pexels.com/photos/3585365/pexels-photo-3585365.jpeg?w=400&h=200&fit=crop",
-                "Halloween pumpkin spooky": "https://images.pexels.com/photos/3652392/pexels-photo-3652392.jpeg?w=400&h=200&fit=crop"
-            }
+            cache_path = self.get_cached_image_path(keyword)
+            if os.path.exists(cache_path):
+                try:
+                    os.remove(cache_path)
+                    print(f"Cleared cached image for '{keyword}'")
+                except Exception as remove_error:
+                    print(f"Failed to remove cached image for '{keyword}': {remove_error}")
             
             try:
-                # Get image URL for the keyword
-                image_url = image_sources.get(keyword)
+                # Get high quality image
+                image_url = self.get_high_quality_image_url(keyword)
                 
-                if image_url:
-                    # Download the image
-                    output_path = "dataset"
-                    if not os.path.exists(output_path):
-                        os.makedirs(output_path)
-                    
-                    headers = {
-                        'User-Agent': 'DailyEventsApp/1.0'
-                    }
-                    
-                    req = urllib.request.Request(image_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=10) as response:
-                        image_data = response.read()
-                        
-                        # Save image
-                        image_path = os.path.join(output_path, f"event_{index}.jpg")
-                        with open(image_path, 'wb') as f:
-                            f.write(image_data)
-                        
-                        # Update UI
-                        self.update_image_ui(image_path)
-                        return
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
                 
-                # Fallback
-                self.update_image_ui(None)
+                # Retry logic
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        req = urllib.request.Request(image_url, headers=headers)
+                        with urllib.request.urlopen(req, timeout=10) as response:
+                            image_data = response.read()
                             
+                            # Save to cache for the current session
+                            with open(cache_path, 'wb') as f:
+                                f.write(image_data)
+                            
+                            print(f"Downloaded fresh image for '{keyword}' (attempt {attempt + 1})")
+                            self.update_image_ui(cache_path)
+                            return
+                    except Exception as retry_error:
+                        print(f"Attempt {attempt + 1} failed: {retry_error}")
+                        if attempt < max_retries - 1:
+                            import time
+                            time.sleep(1)  # Wait before retry
+                
+                # All retries failed
+                print(f"Failed to download image for '{keyword}' after {max_retries} attempts")
+                self.update_image_ui(None)
+                
             except Exception as e:
-                print(f"Error downloading image for '{keyword}': {e}")
+                print(f"Error loading image for '{keyword}': {e}")
                 self.update_image_ui(None)
         
         # Run download in background thread
@@ -264,37 +399,10 @@ class FunApp(App):
             self.image.source = image_path
             self.image.reload()
         else:
-            # Fallback to a working static image
-            self.image.source = 'https://images.pexels.com/photos/1108099/pexels-photo-1108099.jpeg?w=400&h=200&fit=crop'
-    
-    def show_next_event(self, instance):
-        """Cycle to next event or next quote"""
-        if not self.events:
-            return
-            
-        # First, show all quotes for current event
-        if self.current_event_index < len(self.events):
-            event = self.events[self.current_event_index]
-            current_quote = self.quote_label.text
-            quotes = event["quotes"]
-            
-            # Find next quote
-            try:
-                current_index = quotes.index(current_quote)
-                next_index = (current_index + 1) % len(quotes)
-            except:
-                next_index = 0
-            
-            if next_index == 0 and current_index == len(quotes) - 1:
-                # Move to next event
-                self.current_event_index = (self.current_event_index + 1) % len(self.events)
-                event = self.events[self.current_event_index]
-                self.event_title.text = event["name"]
-                self.quote_label.text = random.choice(event["quotes"])
-                self.load_event_image(self.current_event_index)
-            else:
-                # Just change quote in current event
-                self.quote_label.text = quotes[next_index]
+            # Use a high-quality fallback URL
+            fallback_url = "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&h=600&fit=crop"
+            print(f"Using fallback image: {fallback_url}")
+            self.image.source = fallback_url
     
     def show_next_event(self, instance):
         """Cycle to next event or next quote"""
