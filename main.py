@@ -136,7 +136,7 @@ class FunApp(App):
                                 "quotes": quotes
                             })
                 except Exception as wiki_error:
-                    print(f"Wikipedia API error: {wiki_error}")
+                    pass
                 
                 if not events:
                     # Fallback events
@@ -157,7 +157,6 @@ class FunApp(App):
                 self.update_event_ui(0)
                 
             except Exception as e:
-                print(f"Error loading events: {e}")
                 # Fallback events
                 now = datetime.now()
                 self.events = [
@@ -233,7 +232,7 @@ class FunApp(App):
                     return [f'"{quote}" - {author}']
                     
         except Exception as e:
-            print(f"Quote API error: {e}")
+            pass
         
         return fallback_quotes
     
@@ -267,7 +266,6 @@ class FunApp(App):
             return quotes if quotes else fallback_quotes
             
         except Exception as e:
-            print(f"Error fetching quotes: {e}")
             return fallback_quotes
     
     @mainthread
@@ -303,10 +301,9 @@ class FunApp(App):
                 matches = re.findall(r'https://[^\"\']+?\.(?:jpg|jpeg|png|webp|gif)', html)
                 if matches:
                     image_url = matches[0]
-                    print(f"Using Google Images result for '{keyword}'")
                     return image_url
         except Exception as e:
-            print(f"Google Images search error for '{keyword}': {e}")
+            pass
 
         # Fallback: Use curated high-quality image sources
         high_quality_sources = {
@@ -328,10 +325,8 @@ class FunApp(App):
         }
         for key, url in high_quality_sources.items():
             if key in keyword.lower():
-                print(f"Using fallback image for '{keyword}'")
                 return url
 
-        print(f"Using default image for '{keyword}'")
         return "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop"
     
     def load_event_image(self, index):
@@ -347,9 +342,8 @@ class FunApp(App):
             if os.path.exists(cache_path):
                 try:
                     os.remove(cache_path)
-                    print(f"Cleared cached image for '{keyword}'")
                 except Exception as remove_error:
-                    print(f"Failed to remove cached image for '{keyword}': {remove_error}")
+                    pass
             
             try:
                 # Get high quality image
@@ -371,21 +365,17 @@ class FunApp(App):
                             with open(cache_path, 'wb') as f:
                                 f.write(image_data)
                             
-                            print(f"Downloaded fresh image for '{keyword}' (attempt {attempt + 1})")
                             self.update_image_ui(cache_path)
                             return
                     except Exception as retry_error:
-                        print(f"Attempt {attempt + 1} failed: {retry_error}")
                         if attempt < max_retries - 1:
                             import time
                             time.sleep(1)  # Wait before retry
                 
                 # All retries failed
-                print(f"Failed to download image for '{keyword}' after {max_retries} attempts")
                 self.update_image_ui(None)
                 
             except Exception as e:
-                print(f"Error loading image for '{keyword}': {e}")
                 self.update_image_ui(None)
         
         # Run download in background thread
@@ -401,7 +391,6 @@ class FunApp(App):
         else:
             # Use a high-quality fallback URL
             fallback_url = "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&h=600&fit=crop"
-            print(f"Using fallback image: {fallback_url}")
             self.image.source = fallback_url
     
     def show_next_event(self, instance):
