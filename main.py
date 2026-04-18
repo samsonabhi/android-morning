@@ -14,6 +14,14 @@ import json
 import re
 import time
 import shutil
+import ssl
+
+# Build SSL context — use certifi bundle if available (required on Android)
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = ssl.create_default_context()
 
 
 # Curated fallback images indexed by keyword fragment
@@ -125,10 +133,10 @@ class FunApp(App):
 
     def _clean_dataset(self):
         """Remove all files from the dataset folder"""
-        dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+        dataset_dir = os.path.join(self.user_data_dir, 'dataset')
         if os.path.exists(dataset_dir):
             shutil.rmtree(dataset_dir)
-        os.makedirs(dataset_dir)
+        os.makedirs(dataset_dir, exist_ok=True)
     
     def load_today_events(self):
         """Load today's events from Wikipedia 'On this day' and special events"""
@@ -163,7 +171,7 @@ class FunApp(App):
                     }
                     
                     req = urllib.request.Request(url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=10) as response:
+                    with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as response:
                         data = json.loads(response.read())
                         
                         for event in data.get('events', [])[:5]:  # Limit to 5 events
@@ -292,7 +300,7 @@ class FunApp(App):
                 url = "https://zenquotes.io/api/quotes"
                 headers = {'User-Agent': 'DailyEventsApp/1.0'}
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=8) as response:
+                with urllib.request.urlopen(req, timeout=8, context=_SSL_CONTEXT) as response:
                     data = json.loads(response.read())
                     self._quotes_cache = [
                         f'"{item["q"]}" - {item.get("a", "Unknown")}'
@@ -339,9 +347,9 @@ class FunApp(App):
     
     def get_cached_image_path(self, index):
         """Return a per-event image path so Kivy never serves a stale cached texture"""
-        dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+        dataset_dir = os.path.join(self.user_data_dir, 'dataset')
         if not os.path.exists(dataset_dir):
-            os.makedirs(dataset_dir)
+            os.makedirs(dataset_dir, exist_ok=True)
         return os.path.join(dataset_dir, f'event_{index}.jpg')
 
     @mainthread
@@ -378,7 +386,7 @@ class FunApp(App):
             for attempt in range(3):
                 try:
                     req = urllib.request.Request(image_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=15) as response:
+                    with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as response:
                         data = response.read()
                     # Verify it's a valid image (JPEG/PNG magic bytes)
                     if data[:3] == b'\xff\xd8\xff' or data[:8] == b'\x89PNG\r\n\x1a\n':
@@ -396,7 +404,7 @@ class FunApp(App):
             # URL failed or returned non-image — fall back to a fresh random picsum image
             try:
                 req = urllib.request.Request("https://picsum.photos/1200/800", headers=headers)
-                with urllib.request.urlopen(req, timeout=10) as response:
+                with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as response:
                     with open(cache_path, 'wb') as f:
                         f.write(response.read())
                 self.update_image_ui(cache_path)
@@ -416,7 +424,8 @@ class FunApp(App):
             self.image.source = image_path
             self.image.reload()
         else:
-            self.image.source = _DEFAULT_IMAGE
+            # Kivy Image cannot load URLs directly — leave blank on failure
+            self.image.source = ''
         self._set_button_ready()
     
     def show_next_event(self, instance):
