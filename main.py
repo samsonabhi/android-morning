@@ -5,6 +5,7 @@ from kivy.uix.label import Label
 from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.utils import platform
+from kivy.resources import resource_find
 from datetime import datetime
 import os
 import glob
@@ -86,11 +87,12 @@ class FunApp(App):
         # Top bar with share button
         top_bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.08))
         top_bar.add_widget(Label(size_hint=(0.75, 1)))  # spacer
+        icon_path = resource_find('share_icon.png') or 'share_icon.png'
         self.share_btn = Button(
             text='',
             size_hint=(0.25, 1),
-            background_normal='share_icon.png',
-            background_down='share_icon.png',
+            background_normal=icon_path,
+            background_down=icon_path,
             background_color=(1, 1, 1, 1),
             border=(0, 0, 0, 0),
         )
