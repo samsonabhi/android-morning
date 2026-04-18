@@ -121,6 +121,9 @@ sudo apt update && sudo apt install -y \
 5. Install Buildozer — **Cython must be pinned below 3.0** (Cython 3 breaks pyjnius):
 
 ```bash
+# Make 'python' point to python3 (required by some build scripts)
+sudo apt install -y python-is-python3
+
 pip3 install --user "cython<3.0" buildozer
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
@@ -148,11 +151,25 @@ cd ~/android-morning/bin
 python3 -m http.server 8000
 ```
 
-Then open `http://<vm-ip>:8000` in a Windows browser and download the APK. Get the VM IP with:
+The VM is behind VirtualBox NAT so `10.0.2.x` is not directly reachable from Windows. Set up port forwarding **without closing the VM**:
 
-```bash
-hostname -I
+1. Open **VirtualBox Manager** on Windows
+2. Right-click the VM → **Settings → Network → Adapter 1 → Advanced → Port Forwarding**
+3. Add a rule:
+
+| Name | Protocol | Host IP | Host Port | Guest IP | Guest Port |
+|------|----------|---------|-----------|----------|------------|
+| apk | TCP | 127.0.0.1 | 8000 | 10.0.2.15 | 8000 |
+
+4. Click OK
+
+Then open a Windows browser and go to:
+
 ```
+http://127.0.0.1:8000
+```
+
+Click the `.apk` file to download it.
 
 ---
 
@@ -201,6 +218,8 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 | `cmake: command not found` | `sudo apt install -y cmake ninja-build` |
 | `undeclared name not builtin: long` | `pip3 install "cython<3.0"` then `buildozer android clean && buildozer android debug` |
 | `buildozer: command not found` | `echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc && source ~/.bashrc` |
+| `Command 'python' not found` | `sudo apt install -y python-is-python3` |
+| Can't access VM IP from Windows browser | Set up VirtualBox port forwarding (Host `127.0.0.1:8000` → Guest `10.0.2.15:8000`) |
 
 ### Buildozer config summary
 
