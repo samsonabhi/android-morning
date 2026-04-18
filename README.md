@@ -11,7 +11,7 @@ On launch the app:
 3. Fetches up to 5 historical events from Wikipedia's "On this day" API
 4. For each event, resolves an image URL from the Wikipedia article and fetches 3 quotes from ZenQuotes
 5. Displays the first event — title, image, and quote
-6. Pressing **Click for fun ▶** cycles through quotes for the current event; on the last quote it advances to the next event and loads a new image
+6. Pressing **Click for fun** cycles through quotes for the current event; on the last quote it advances to the next event and loads a new image
 
 All network work runs in background threads. The button disables itself and shows **"Loading image…"** while a download is in progress.
 
