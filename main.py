@@ -64,6 +64,7 @@ class FunApp(App):
         self.events = []
         self.current_event_index = 0
         self._quotes_cache = []
+        self._last_quote = ""
 
         # Clean dataset folder on startup
         self._clean_dataset()
@@ -74,7 +75,7 @@ class FunApp(App):
         # Event title label
         self.event_title = Label(
             text="Loading today's events...",
-            font_size=20,
+            font_size=22,
             bold=True,
             halign='center',
             valign='middle',
@@ -99,7 +100,7 @@ class FunApp(App):
         
         # Button
         self.button = Button(
-            text="Click for fun  ▶",
+            text="Click for fun",
             font_size=20,
             bold=True,
             size_hint=(1, 0.1),
@@ -305,13 +306,35 @@ class FunApp(App):
 
         return random.sample(fallback_quotes, min(count, len(fallback_quotes)))
     
+    def _summarize_title(self, name):
+        """Return a 5-word summary of a title, skipping common stop words"""
+        stop = {'a','an','the','of','in','on','at','to','for','and','or','but',
+                'is','was','were','be','by','with','from','that','this','as','it',
+                'its','into','after','before','during','about','over','under'}
+        words = re.sub(r'[^\w\s]', '', name).split()
+        key_words = [w for w in words if w.lower() not in stop]
+        chosen = key_words[:5] if key_words else words[:5]
+        return 'On this day: ' + ' '.join(chosen)
+
+    def _pick_quote(self, quotes):
+        """Pick a quote that is different from the last one shown"""
+        if len(quotes) == 1:
+            self._last_quote = quotes[0]
+            return quotes[0]
+        candidates = [q for q in quotes if q != self._last_quote]
+        if not candidates:
+            candidates = quotes
+        chosen = random.choice(candidates)
+        self._last_quote = chosen
+        return chosen
+
     @mainthread
     def update_event_ui(self, index):
         """Update UI with event data"""
         if index < len(self.events):
             event = self.events[index]
-            self.event_title.text = event["name"]
-            self.quote_label.text = random.choice(event["quotes"])
+            self.event_title.text = self._summarize_title(event["name"])
+            self.quote_label.text = self._pick_quote(event["quotes"])
             self.load_event_image(index)
     
     def get_cached_image_path(self, index):
@@ -331,7 +354,7 @@ class FunApp(App):
     @mainthread
     def _set_button_ready(self):
         self.button.disabled = False
-        self.button.text = "Click for fun  ▶"
+        self.button.text = "Click for fun"
         self.button.background_color = (0.18, 0.53, 0.93, 1)
 
     def load_event_image(self, index):
@@ -370,11 +393,9 @@ class FunApp(App):
                     if attempt < 2:
                         time.sleep(1)
 
-            # URL failed or returned non-image — use curated fallback
-            keyword = self.events[index].get('keyword', '')
-            fallback_url = _fallback_image_for(keyword)
+            # URL failed or returned non-image — fall back to a fresh random picsum image
             try:
-                req = urllib.request.Request(fallback_url, headers=headers)
+                req = urllib.request.Request("https://picsum.photos/1200/800", headers=headers)
                 with urllib.request.urlopen(req, timeout=10) as response:
                     with open(cache_path, 'wb') as f:
                         f.write(response.read())
@@ -399,35 +420,24 @@ class FunApp(App):
         self._set_button_ready()
     
     def show_next_event(self, instance):
-        """Cycle to next event or next quote, always fetching a fresh image"""
+        """Pick a random event and fetch a brand-new image/quote on every click"""
         if not self.events:
             return
 
-        if self.current_event_index < len(self.events):
-            event = self.events[self.current_event_index]
-            current_quote = self.quote_label.text
-            quotes = event["quotes"]
+        self.current_event_index = random.randrange(len(self.events))
+        event = self.events[self.current_event_index]
+        self.event_title.text = self._summarize_title(event["name"])
+        self.quote_label.text = self._pick_quote(event["quotes"])
 
-            # Find next quote
-            try:
-                current_index = quotes.index(current_quote)
-                next_index = (current_index + 1) % len(quotes)
-            except ValueError:
-                current_index = -1
-                next_index = 0
+        # Seedless picsum URL — each request follows a redirect to a different random image
+        event["image_url"] = "https://picsum.photos/1200/800"
 
-            if next_index == 0 and current_index == len(quotes) - 1:
-                # Advance to next event
-                self.current_event_index = (self.current_event_index + 1) % len(self.events)
-                event = self.events[self.current_event_index]
-                self.event_title.text = event["name"]
-                self.quote_label.text = random.choice(event["quotes"])
-            else:
-                # Stay on current event, advance quote
-                self.quote_label.text = quotes[next_index]
+        # Delete cached image to force a fresh download
+        cache_path = self.get_cached_image_path(self.current_event_index)
+        if os.path.exists(cache_path):
+            os.remove(cache_path)
 
-            # Always fetch a fresh image for the now-current event
-            self.load_event_image(self.current_event_index)
+        self.load_event_image(self.current_event_index)
 
 if __name__ == '__main__':
     FunApp().run()
