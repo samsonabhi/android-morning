@@ -3,10 +3,13 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.image import Image
+from kivy.core.window import Window
+from kivy.utils import platform
 from datetime import datetime
 import os
+import glob
 import random
-from kivy.clock import mainthread
+from kivy.clock import mainthread, Clock
 import threading
 import urllib.request
 import urllib.error
@@ -79,27 +82,41 @@ class FunApp(App):
 
         # Layout
         self.layout = BoxLayout(orientation='vertical')
-        
+
+        # Top bar with share button
+        top_bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.08))
+        top_bar.add_widget(Label(size_hint=(0.75, 1)))  # spacer
+        self.share_btn = Button(
+            text='',
+            size_hint=(0.25, 1),
+            background_normal='share_icon.png',
+            background_down='share_icon.png',
+            background_color=(1, 1, 1, 1),
+            border=(0, 0, 0, 0),
+        )
+        self.share_btn.bind(on_press=self.share_screenshot)
+        top_bar.add_widget(self.share_btn)
+
         # Event title label
         self.event_title = Label(
             text="Loading today's events...",
-            font_size=22,
+            font_size=70,
             bold=True,
             halign='center',
             valign='middle',
-            size_hint=(1, 0.20)
+            size_hint=(1, 0.17)
         )
         self.event_title.bind(size=self.event_title.setter('text_size'))
         
         # Image widget
         self.image = Image(
-            size_hint=(1, 0.50)
+            size_hint=(1, 0.45)
         )
         
         # Quote label
         self.quote_label = Label(
             text="Fetching inspiring quotes...",
-            font_size=18,
+            font_size=50,
             halign='center',
             valign='middle',
             size_hint=(1, 0.2)
@@ -108,8 +125,8 @@ class FunApp(App):
         
         # Button
         self.button = Button(
-            text="Click for fun",
-            font_size=20,
+            text="Refresh",
+            font_size=40,
             bold=True,
             size_hint=(1, 0.1),
             background_normal='',
@@ -118,6 +135,7 @@ class FunApp(App):
         )
         self.button.bind(on_press=self.show_next_event)
         
+        self.layout.add_widget(top_bar)
         self.layout.add_widget(self.event_title)
         self.layout.add_widget(self.image)
         self.layout.add_widget(self.quote_label)
@@ -362,7 +380,7 @@ class FunApp(App):
     @mainthread
     def _set_button_ready(self):
         self.button.disabled = False
-        self.button.text = "Click for fun"
+        self.button.text = "Refresh"
         self.button.background_color = (0.18, 0.53, 0.93, 1)
 
     def load_event_image(self, index):
@@ -447,6 +465,61 @@ class FunApp(App):
             os.remove(cache_path)
 
         self.load_event_image(self.current_event_index)
+
+    def share_screenshot(self, instance):
+        """Take a screenshot and share it via Android share sheet"""
+        try:
+            # Clean up old share screenshots
+            for f in glob.glob(os.path.join(self.user_data_dir, 'share_*.png')):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+
+            screenshot_path = os.path.join(self.user_data_dir, 'share_{:04d}.png')
+            actual_path = Window.screenshot(name=screenshot_path)
+
+            if actual_path and os.path.exists(actual_path):
+                Clock.schedule_once(lambda dt: self._do_share(actual_path), 0.5)
+        except Exception:
+            pass
+
+    def _do_share(self, screenshot_path):
+        """Trigger platform share sheet with screenshot"""
+        try:
+            if not os.path.exists(screenshot_path):
+                return
+            if platform == 'android':
+                self._share_android(screenshot_path)
+            # On desktop: screenshot saved silently, no share sheet
+        except Exception:
+            pass
+
+    def _share_android(self, screenshot_path):
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Intent = autoclass('android.content.Intent')
+            FileProvider = autoclass('androidx.core.content.FileProvider')
+
+            context = PythonActivity.mActivity
+            java_file = autoclass('java.io.File')(screenshot_path)
+            authority = 'com.example.dailyquote.fileprovider'
+            uri = FileProvider.getUriForFile(context, authority, java_file)
+
+            intent = Intent(Intent.ACTION_SEND)
+            intent.setType('image/png')
+            intent.putExtra(Intent.EXTRA_STREAM, uri)
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+            share_text = f"{self.event_title.text}\n\n{self.quote_label.text}"
+            intent.putExtra(Intent.EXTRA_TEXT, share_text)
+
+            chooser = Intent.createChooser(intent, 'Share via')
+            PythonActivity.mActivity.startActivity(chooser)
+        except Exception:
+            pass
+
 
 if __name__ == '__main__':
     FunApp().run()
