@@ -580,6 +580,12 @@ class FunApp(App):
 
             share_text = self.event_title.text + '\n\n' + self.quote_label.text
 
+            # Explicitly grant read permission to WhatsApp (belt-and-suspenders
+            # alongside FLAG_GRANT_READ_URI_PERMISSION + ClipData)
+            context.grantUriPermission(
+                'com.whatsapp', uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+
             intent = Intent(Intent.ACTION_SEND)
             intent.setType('image/jpeg')
             intent.setPackage('com.whatsapp')
