@@ -1,22 +1,23 @@
-# Daily Quote Generator
+﻿# Android Morning App
 
-A Kivy app that shows historical events for today's date, each with a fresh random image and an inspiring quote. Runs on desktop (Windows/macOS/Linux) and builds to Android via Buildozer.
+A Kivy-based morning companion app that shows celebrity birthdays, historical events, and inspiring quotes — all paired with fresh morning-themed photography from Pexels. Runs on desktop (Windows/macOS/Linux) and builds to Android via Buildozer.
 
 ## How It Works
 
 On launch the app:
 
 1. Wipes the `dataset/` folder to start fresh
-2. Checks today's date against a built-in holidays database
-3. Fetches up to 5 historical events from Wikipedia's "On this day" API
-4. For each event fetches 3 quotes from ZenQuotes
-5. Displays the first event — a 5-word summarised title prefixed with "On this day:", a random image, and a quote
+2. Fetches **celebrity birthdays** for today from Wikipedia's births feed, enriched with occupation and net worth data from the API Ninjas Celebrity API
+3. Checks today's date against a built-in holidays database
+4. Fetches up to 5 **historical events** from Wikipedia's "On this day" API
+5. For each event fetches 3 quotes from ZenQuotes
+6. Displays the first event — a 5-word summarised title, a morning-themed Pexels photo, and a quote
 
-Pressing **Click for fun**:
-- Picks a random event each time with no limit on clicks
-- Downloads a brand-new random image from [picsum.photos](https://picsum.photos) on every click
+Pressing **Refresh**:
+- Picks a random event each time
+- Downloads a fresh morning-themed image from Pexels on every click
 - Shows a different quote each click (never repeats the last one)
-- Disables itself and shows **"Loading image…"** until the download finishes, then re-enables
+- Disables itself and shows **"Loading imageâ€¦"** until the download finishes, then re-enables
 
 All network work runs in background threads. When the app closes `dataset/` is wiped.
 
@@ -24,14 +25,25 @@ All network work runs in background threads. When the app closes `dataset/` is w
 
 | Element | Behaviour |
 |---------|-----------|
-| Title | Summarised to 5 key words, prefixed "On this day:", font size 22, wraps automatically |
-| Image | Fresh random image on every click via `picsum.photos/1200/800` |
+| Title | Summarised to 5 key words, prefixed "On this day:", wraps automatically |
+| Image | Fresh morning-themed photo from Pexels on every load |
 | Quote | Never repeats the previous quote; drawn from a 50+ quote ZenQuotes cache |
 | Button | Disabled while image is loading; re-enabled on completion |
+| Share | Top-right button takes a screenshot and opens the Android share sheet |
 
 ## Event Sources
 
-**Built-in holidays** (checked first):
+**Celebrity birthdays** (shown first) — fetched from:
+```
+https://en.wikipedia.org/api/rest_v1/feed/onthisday/births/<MM>/<DD>
+```
+Sorted by most recent birth year. Each entry is enriched by name lookup via:
+```
+https://api.api-ninjas.com/v1/celebrity?name=<name>
+```
+Requires an [API Ninjas](https://api-ninjas.com) key set in `API_NINJAS_KEY`.
+
+**Built-in holidays** (checked after birthdays):
 
 | Date | Event |
 |------|-------|
@@ -46,37 +58,45 @@ All network work runs in background threads. When the app closes `dataset/` is w
 | Dec 25 | Christmas |
 
 **Wikipedia "On this day"** — up to 5 events fetched from:
-
 ```
 https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/<MM>/<DD>
 ```
 
-No API key required.
-
 ## Image Source
 
-Every click fetches a new image from:
+Every image is fetched from the **Pexels API** using a rotating pool of morning-themed search queries:
+
+> sunrise Â· morning coffee Â· good morning Â· sunrise sky Â· morning light Â· morning mist Â· dawn landscape Â· morning breakfast Â· golden hour morning Â· peaceful morning Â· morning routine Â· coffee cup morning
 
 ```
-https://picsum.photos/1200/800
+https://api.pexels.com/v1/search?query=<query>&per_page=15&orientation=landscape
 ```
 
-This URL redirects to a different random photo on every request. The image is saved to `dataset/event_<N>.jpg` and the cache file is deleted before each new download to prevent Kivy serving a stale texture.
+A random query is chosen per request; a random photo is picked from the results. Images are saved to `dataset/event_<N>.jpg` and the cache file is deleted before each Refresh to force a fresh download.
+
+Requires a [Pexels API](https://www.pexels.com/api/) key set in `PEXELS_API_KEY`.
 
 ## Quote Source
 
 Quotes are fetched once per session from ZenQuotes:
-
 ```
 https://zenquotes.io/api/quotes
 ```
+The full response (50+ quotes) is cached in memory. Each click samples a quote that differs from the one currently displayed. If the request fails, built-in fallback quotes are used. No API key required.
 
-The full response (50+ quotes) is cached in memory. Each click samples a quote that differs from the one currently displayed. If the request fails, a small set of built-in fallback quotes is used. No API key required.
+## API Keys
+
+Set these constants near the top of `main.py`:
+
+| Constant | Service | Where to get one |
+|----------|---------|-----------------|
+| `API_NINJAS_KEY` | API Ninjas (celebrity data) | https://api-ninjas.com |
+| `PEXELS_API_KEY` | Pexels (morning photos) | https://www.pexels.com/api/ |
 
 ## Running on Desktop
 
 ```bash
-pip install kivy
+pip install kivy certifi
 python main.py
 ```
 
@@ -115,12 +135,10 @@ sudo apt update && sudo apt install -y \
     build-essential cmake ninja-build zlib1g-dev
 ```
 
-5. Install Buildozer — **Cython must be pinned below 3.0** (Cython 3 breaks pyjnius):
+6. Install Buildozer — **Cython must be pinned below 3.0** (Cython 3 breaks pyjnius):
 
 ```bash
-# Make 'python' point to python3 (required by some build scripts)
 sudo apt install -y python-is-python3
-
 pip3 install --user "cython<3.0" buildozer
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
@@ -133,7 +151,7 @@ cd ~/android-morning
 buildozer android debug
 ```
 
-The first build downloads the Android SDK and NDK (~1 GB) and takes 20–40 minutes. Subsequent builds are much faster.
+The first build downloads the Android SDK and NDK (~1 GB) and takes 20â€“40 minutes. Subsequent builds are much faster.
 
 8. Output APK is at:
 
@@ -147,32 +165,14 @@ The first build downloads the Android SDK and NDK (~1 GB) and takes 20–40 minu
 cp ~/android-morning/bin/*.apk /media/sf_GitHub/android-morning/bin/
 ```
 
-10. Serve the APK back to Windows (alternative):
+10. Alternatively, serve the APK to Windows over HTTP:
 
 ```bash
 cd ~/android-morning/bin
 python3 -m http.server 8000
 ```
 
-The VM is behind VirtualBox NAT so `10.0.2.x` is not directly reachable from Windows. Set up port forwarding **without closing the VM**:
-
-1. Open **VirtualBox Manager** on Windows
-2. Right-click the VM → **Settings → Network → Adapter 1 → Advanced → Port Forwarding**
-3. Add a rule:
-
-| Name | Protocol | Host IP | Host Port | Guest IP | Guest Port |
-|------|----------|---------|-----------|----------|------------|
-| apk | TCP | 127.0.0.1 | 8000 | 10.0.2.15 | 8000 |
-
-4. Click OK
-
-Then open a Windows browser and go to:
-
-```
-http://127.0.0.1:8000
-```
-
-Click the `.apk` file to download it.
+Set up VirtualBox port forwarding (Host `127.0.0.1:8000` â†’ Guest `10.0.2.15:8000`), then open `http://127.0.0.1:8000` in a Windows browser and download the `.apk`.
 
 ---
 
@@ -194,7 +194,6 @@ pip3 install --user "cython<3.0" buildozer
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
-# Copy project into WSL filesystem (faster builds than /mnt/c)
 cp -r /mnt/c/Users/slim7/Documents/GitHub/android-morning ~/android-morning
 cd ~/android-morning
 buildozer android debug
@@ -211,7 +210,7 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 ### Installing on your Android phone
 
 1. Transfer the `.apk` file to your phone (USB, Google Drive, email, etc.)
-2. On the phone go to **Settings → Security → Install unknown apps** and allow installs from your file manager or browser
+2. On the phone go to **Settings â†’ Security â†’ Install unknown apps** and allow installs from your file manager or browser
 3. Open the `.apk` file on the phone and tap **Install**
 
 ### Common Build Errors
@@ -222,7 +221,7 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 | `undeclared name not builtin: long` | `pip3 install "cython<3.0"` then `buildozer android clean && buildozer android debug` |
 | `buildozer: command not found` | `echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc && source ~/.bashrc` |
 | `Command 'python' not found` | `sudo apt install -y python-is-python3` |
-| Can't access VM IP from Windows browser | Set up VirtualBox port forwarding (Host `127.0.0.1:8000` → Guest `10.0.2.15:8000`) |
+| Can't access VM IP from Windows browser | Set up VirtualBox port forwarding (Host `127.0.0.1:8000` â†’ Guest `10.0.2.15:8000`) |
 | `Permission denied` on `/media/sf_*` | `sudo adduser $USER vboxsf` then reboot the VM |
 | `Cannot create symlink` / SDL2 tar errors | Build from `~/android-morning`, not from the shared folder (vboxsf has no symlink support) |
 
@@ -238,11 +237,11 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 | Min API | 26 (Android 8.0) |
 | Permission | `INTERNET` |
 | Requirements | `python3, kivy, pillow, certifi` |
-| Icon | `icon.png` (512×512 sunrise, project root) |
+| Icon | `icon.png` (512Ã—512 sunrise, project root) |
 
 ## App Icon
 
-The icon (`icon.png`) is a 512×512 early morning sunrise scene — a golden sun rising between dark hills against a deep blue-to-orange sky, with rounded corners matching Android's icon shape. It is generated by running:
+The icon (`icon.png`) is a 512Ã—512 early morning sunrise scene — a golden sun rising between dark hills against a deep blue-to-orange sky, with rounded corners matching Android's icon shape. It is generated by running:
 
 ```powershell
 python icon_gen.py
@@ -252,14 +251,17 @@ Or it is already present in the project root. Buildozer picks it up automaticall
 
 ## Troubleshooting
 
-**Image stays blank** — The Wikipedia image failed validation (not a JPEG/PNG) and the curated fallback also failed. Check your internet connection.
+**Image stays blank** — The Pexels request failed or returned a non-image response. Check your `PEXELS_API_KEY` and internet connection.
+
+**No celebrity birthdays showing** — Check that `API_NINJAS_KEY` is set correctly. The app will still show historical events and holidays without it.
 
 **Quotes not showing** — ZenQuotes request failed; built-in fallback quotes will display instead.
 
 **Button stays grey** — A download thread is still running. It will re-enable automatically when done or after 3 retries (~15 s maximum).
 
-**"App was built for an older version of Android"** — This warning appears when `targetSdkVersion` is below 34. The spec is set to API 36; rebuild the APK from a clean state (`buildozer android clean && buildozer android debug`).
+**"App was built for an older version of Android"** — Rebuild the APK from a clean state (`buildozer android clean && buildozer android debug`).
 
-**SSL / network errors on Android 14+** — Python's `urllib` does not use the system CA store on Android. The app uses `certifi` to provide its own CA bundle. Ensure `certifi` is in `requirements` in `buildozer.spec` and rebuild.
+**SSL / network errors on Android 14+** — The app uses `certifi` to provide its own CA bundle. Ensure `certifi` is in `requirements` in `buildozer.spec` and rebuild.
 
 **Writable storage crash on Android 14+** — The app uses `self.user_data_dir` (Kivy's private storage path) for image caching. Do not point file writes at `__file__`'s directory — that path is inside the read-only APK zip on newer Android.
+

@@ -3,6 +3,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.image import Image
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.resources import resource_find
@@ -14,6 +15,7 @@ from kivy.clock import mainthread, Clock
 import threading
 import urllib.request
 import urllib.error
+import urllib.parse
 import json
 import re
 import time
@@ -28,34 +30,27 @@ except ImportError:
     _SSL_CONTEXT = ssl.create_default_context()
 
 
-# Curated fallback images indexed by keyword fragment
-_FALLBACK_IMAGES = {
-    "celebration": "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1200&h=800&fit=crop",
-    "christmas":   "https://images.unsplash.com/photo-1543269865-cbdf26effbad?w=1200&h=800&fit=crop",
-    "new year":    "https://images.unsplash.com/photo-1504434318773-77635a50b0f1?w=1200&h=800&fit=crop",
-    "valentine":   "https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=1200&h=800&fit=crop",
-    "love":        "https://images.unsplash.com/photo-1518231557733-0c6f47ad1b44?w=1200&h=800&fit=crop",
-    "holiday":     "https://images.unsplash.com/photo-1511632765486-a01980e01a18?w=1200&h=800&fit=crop",
-    "halloween":   "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
-    "pumpkin":     "https://images.unsplash.com/photo-1506259926900-3f6a79b04de0?w=1200&h=800&fit=crop",
-    "fireworks":   "https://images.unsplash.com/photo-1504382216647-33e28496e0cd?w=1200&h=800&fit=crop",
-    "nature":      "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop",
-    "earth":       "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=800&fit=crop",
-    "history":     "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?w=1200&h=800&fit=crop",
-    "book":        "https://images.unsplash.com/photo-1507842217343-583f20270319?w=1200&h=800&fit=crop",
-    "women":       "https://images.unsplash.com/photo-1524503033411-c9566986fc8f?w=1200&h=800&fit=crop",
-    "workers":     "https://images.unsplash.com/photo-1504376830547-506dedfe681a?w=1200&h=800&fit=crop",
-    "america":     "https://images.unsplash.com/photo-1501466044931-62695aada8e9?w=1200&h=800&fit=crop",
-    "irish":       "https://images.unsplash.com/photo-1615478503562-ec2d8aa0e24e?w=1200&h=800&fit=crop",
-}
-_DEFAULT_IMAGE = "https://images.unsplash.com/photo-1519452575417-564c1401ecc0?w=1200&h=800&fit=crop"
+# API Ninjas key — get a free key at https://api-ninjas.com
+API_NINJAS_KEY = "4fiuXASvic9NrNqWEinAFukT6x7UNSBNgEiSQDlT"
 
-def _fallback_image_for(keyword):
-    kw = (keyword or "").lower()
-    for key, url in _FALLBACK_IMAGES.items():
-        if key in kw:
-            return url
-    return _DEFAULT_IMAGE
+# Pexels API key — get a free key at https://www.pexels.com/api/
+PEXELS_API_KEY = "KjQ1zvKmSESzrDqdscKaY8rcU3EgFUUIGc5vVnLdviDvDD2MkkwVBtvk"
+
+# Morning-themed search queries rotated for each image request
+_MORNING_QUERIES = [
+    "sunrise",
+    "morning coffee",
+    "good morning",
+    "sunrise sky",
+    "morning light",
+    "morning mist",
+    "dawn landscape",
+    "morning breakfast",
+    "golden hour morning",
+    "peaceful morning",
+    "morning routine",
+    "coffee cup morning",
+]
 
 # Holiday and special events database
 SPECIAL_EVENTS = {
@@ -69,6 +64,11 @@ SPECIAL_EVENTS = {
     (10, 31): {"name": "Halloween", "keywords": ["pumpkin", "spooky", "costume"]},
     (12, 25): {"name": "Christmas", "keywords": ["christmas", "celebration", "holiday", "festive"]},
 }
+
+class ImageButton(ButtonBehavior, Image):
+    """A pressable Image that keeps its aspect ratio."""
+    pass
+
 
 class FunApp(App):
     def build(self):
@@ -84,25 +84,10 @@ class FunApp(App):
         # Layout
         self.layout = BoxLayout(orientation='vertical')
 
-        # Top bar with share button
-        top_bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.08))
-        top_bar.add_widget(Label(size_hint=(0.75, 1)))  # spacer
-        icon_path = resource_find('share_icon.png') or 'share_icon.png'
-        self.share_btn = Button(
-            text='',
-            size_hint=(0.25, 1),
-            background_normal=icon_path,
-            background_down=icon_path,
-            background_color=(1, 1, 1, 1),
-            border=(0, 0, 0, 0),
-        )
-        self.share_btn.bind(on_press=self.share_screenshot)
-        top_bar.add_widget(self.share_btn)
-
         # Event title label
         self.event_title = Label(
             text="Loading today's events...",
-            font_size=70,
+            font_size=60,
             bold=True,
             halign='center',
             valign='middle',
@@ -130,18 +115,32 @@ class FunApp(App):
             text="Refresh",
             font_size=40,
             bold=True,
-            size_hint=(1, 0.1),
+            size_hint=(0.5, 1),
             background_normal='',
             background_color=(0.18, 0.53, 0.93, 1),
             color=(1, 1, 1, 1),
         )
         self.button.bind(on_press=self.show_next_event)
-        
-        self.layout.add_widget(top_bar)
+
+        # WhatsApp share button (icon, aspect-ratio preserved)
+        wa_icon = resource_find('whatsapp_icon.png') or 'whatsapp_icon.png'
+        self.whatsapp_btn = ImageButton(
+            source=wa_icon,
+            keep_ratio=True,
+            allow_stretch=True,
+            size_hint=(0.5, 1),
+        )
+        self.whatsapp_btn.bind(on_press=self.share_whatsapp)
+
+        # Bottom bar: Refresh + WhatsApp side by side
+        bottom_bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.1))
+        bottom_bar.add_widget(self.button)
+        bottom_bar.add_widget(self.whatsapp_btn)
+
         self.layout.add_widget(self.event_title)
         self.layout.add_widget(self.image)
         self.layout.add_widget(self.quote_label)
-        self.layout.add_widget(self.button)
+        self.layout.add_widget(bottom_bar)
         
         # Start loading events in background
         self.load_today_events()
@@ -167,7 +166,11 @@ class FunApp(App):
                 day = now.day
                 
                 events = []
-                
+
+                # Fetch celebrity birthdays FIRST so they appear at the top
+                celeb_events = self.fetch_celebrity_birthdays(month, day)
+                events.extend(celeb_events)
+
                 # Check for special holidays/events today
                 if (month, day) in SPECIAL_EVENTS:
                     special_event = SPECIAL_EVENTS[(month, day)]
@@ -176,7 +179,6 @@ class FunApp(App):
                     events.append({
                         "name": special_event["name"],
                         "keyword": keyword,
-                        "image_url": _fallback_image_for(keyword),
                         "quotes": quotes
                     })
                 
@@ -206,38 +208,22 @@ class FunApp(App):
                             # Create keyword from event text
                             keyword = self.extract_keyword(text)
 
-                            # Use Wikipedia page image if available — skip gifs and svgs
-                            image_url = None
-                            for page in event.get('pages', []):
-                                # Prefer originalimage, fall back to thumbnail
-                                for key in ('originalimage', 'thumbnail'):
-                                    src = page.get(key, {}).get('source', '')
-                                    if src and not src.lower().endswith(('.gif', '.svg', '.svg.png')):
-                                        image_url = src
-                                        break
-                                if image_url:
-                                    break
-                            if not image_url:
-                                image_url = _fallback_image_for(keyword)
-
                             # Fetch real quotes for this event
                             quotes = self.fetch_multiple_quotes(3)
 
                             events.append({
                                 "name": f"{year}: {event_name}",
                                 "keyword": keyword,
-                                "image_url": image_url,
                                 "quotes": quotes
                             })
                 except Exception as wiki_error:
                     pass
-                
+
                 if not events:
                     # Fallback events
                     events = [{
                         "name": f"April {day}, {now.year}",
-                        "keyword": "celebration happiness",
-                        "image_url": _DEFAULT_IMAGE,
+                        "keyword": "morning",
                         "quotes": [
                             "Every day is a new opportunity!",
                             "Make today amazing!",
@@ -257,8 +243,7 @@ class FunApp(App):
                 self.events = [
                     {
                         "name": f"April {now.day}, {now.year}",
-                        "keyword": "celebration happiness joy",
-                        "image_url": _DEFAULT_IMAGE,
+                        "keyword": "morning",
                         "quotes": [
                             "Every day brings new possibilities!",
                             "Make today count!",
@@ -267,8 +252,7 @@ class FunApp(App):
                     },
                     {
                         "name": "Historical Moment",
-                        "keyword": "history learning wisdom",
-                        "image_url": _fallback_image_for("history"),
+                        "keyword": "morning light",
                         "quotes": [
                             "History teaches us valuable lessons!",
                             "Learn from the past to shape the future!",
@@ -305,6 +289,108 @@ class FunApp(App):
         else:
             return 'historical event'
 
+    def _lookup_celebrity_api(self, name):
+        """Look up a single celebrity by name via API Ninjas. Returns dict or None."""
+        if not API_NINJAS_KEY or API_NINJAS_KEY == "YOUR_API_NINJAS_KEY_HERE":
+            return None
+        try:
+            encoded = urllib.parse.quote(name)
+            url = f"https://api.api-ninjas.com/v1/celebrity?name={encoded}"
+            headers = {
+                'X-Api-Key': API_NINJAS_KEY,
+                'User-Agent': 'DailyEventsApp/1.0',
+            }
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8, context=_SSL_CONTEXT) as response:
+                results = json.loads(response.read())
+            return results[0] if results else None
+        except Exception:
+            return None
+
+    def fetch_celebrity_birthdays(self, month, day):
+        """Fetch celebrities born on today's date.
+        Uses Wikipedia births endpoint for the date-based list, then enriches
+        each entry with API Ninjas Celebrity API for occupation/net-worth.
+        Returns a list of event dicts ready for self.events."""
+        try:
+            month_str = f"{month:02d}"
+            day_str = f"{day:02d}"
+            url = (
+                f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/births/"
+                f"{month_str}/{day_str}"
+            )
+            headers = {'User-Agent': 'DailyEventsApp/1.0 (learning@project.com)'}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as response:
+                data = json.loads(response.read())
+
+            births = data.get('births', [])
+            # Sort by most recent birth year so modern celebs come first
+            births.sort(key=lambda b: b.get('year', 0), reverse=True)
+
+            events = []
+            for birth in births[:5]:
+                wiki_name = birth.get('text', '').split(',')[0].strip()
+                birth_year = birth.get('year', '')
+                if not wiki_name:
+                    continue
+
+                # Try to get extra detail from API Ninjas
+                celeb = self._lookup_celebrity_api(wiki_name)
+                if celeb:
+                    occupation = celeb.get('occupation', [])
+                    if isinstance(occupation, list):
+                        occupation = occupation[0].replace('_', ' ').title() if occupation else ''
+                    if occupation:
+                        label = f"On this day: {occupation} {wiki_name} was born in {birth_year}"
+                    else:
+                        label = f"On this day: {wiki_name} was born in {birth_year}"
+                else:
+                    # Extract profession from Wikipedia description ("Name, profession, ...")
+                    description = birth.get('text', '')
+                    parts = [p.strip() for p in description.split(',')]
+                    # parts[0] is the name; parts[1] is typically nationality+profession
+                    profession = parts[1] if len(parts) > 1 else ''
+                    if len(profession) > 60:
+                        profession = profession[:57] + '...'
+                    if profession:
+                        label = f"On this day: {profession} {wiki_name} was born in {birth_year}"
+                    else:
+                        label = f"On this day: {wiki_name} was born in {birth_year}"
+
+                quotes = self.fetch_multiple_quotes(3)
+                events.append({
+                    "name": label,
+                    "keyword": "celebrity birthday",
+                    "quotes": quotes,
+                })
+            return events
+        except Exception:
+            return []
+
+    def fetch_pexels_image_url(self):
+        """Fetch a random morning-themed image URL from Pexels API."""
+        query = random.choice(_MORNING_QUERIES)
+        try:
+            encoded = urllib.parse.quote(query)
+            url = f"https://api.pexels.com/v1/search?query={encoded}&per_page=15&orientation=landscape"
+            headers = {
+                'Authorization': PEXELS_API_KEY,
+                'User-Agent': 'DailyEventsApp/1.0',
+            }
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as response:
+                data = json.loads(response.read())
+            photos = data.get('photos', [])
+            if photos:
+                photo = random.choice(photos)
+                # Use 'large2x' for high-res, fall back to 'large'
+                src = photo.get('src', {})
+                return src.get('large2x') or src.get('large') or src.get('original')
+        except Exception:
+            pass
+        return None
+
     def fetch_multiple_quotes(self, count=3):
         """Fetch multiple quotes using ZenQuotes API, cached for the session"""
         fallback_quotes = [
@@ -335,7 +421,9 @@ class FunApp(App):
         return random.sample(fallback_quotes, min(count, len(fallback_quotes)))
     
     def _summarize_title(self, name):
-        """Return a 5-word summary of a title, skipping common stop words"""
+        """Return a display title. Strings already prefixed with 'On this day:' are passed through as-is."""
+        if name.startswith('On this day:'):
+            return name
         stop = {'a','an','the','of','in','on','at','to','for','and','or','but',
                 'is','was','were','be','by','with','from','that','this','as','it',
                 'its','into','after','before','during','about','over','under'}
@@ -361,7 +449,7 @@ class FunApp(App):
         """Update UI with event data"""
         if index < len(self.events):
             event = self.events[index]
-            self.event_title.text = self._summarize_title(event["name"])
+            self.event_title.text = self._summarize_title(event['name'])
             self.quote_label.text = self._pick_quote(event["quotes"])
             self.load_event_image(index)
     
@@ -386,15 +474,10 @@ class FunApp(App):
         self.button.background_color = (0.18, 0.53, 0.93, 1)
 
     def load_event_image(self, index):
-        """Download and display the image stored in the event dict"""
+        """Fetch a morning-themed image from Pexels and display it."""
         self._set_button_loading()
 
         def download_image():
-            if index >= len(self.events):
-                self._set_button_ready()
-                return
-
-            image_url = self.events[index].get("image_url", _DEFAULT_IMAGE)
             cache_path = self.get_cached_image_path(index)
 
             # Use cached file if it already exists for this event
@@ -403,33 +486,28 @@ class FunApp(App):
                 return
 
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            for attempt in range(3):
-                try:
-                    req = urllib.request.Request(image_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as response:
-                        data = response.read()
-                    # Verify it's a valid image (JPEG/PNG magic bytes)
-                    if data[:3] == b'\xff\xd8\xff' or data[:8] == b'\x89PNG\r\n\x1a\n':
-                        with open(cache_path, 'wb') as f:
-                            f.write(data)
-                        self.update_image_ui(cache_path)
-                        return
-                    else:
-                        # Not a valid image — fall through to fallback
-                        break
-                except Exception:
-                    if attempt < 2:
-                        time.sleep(1)
 
-            # URL failed or returned non-image — fall back to a fresh random picsum image
-            try:
-                req = urllib.request.Request("https://picsum.photos/1200/800", headers=headers)
-                with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as response:
-                    with open(cache_path, 'wb') as f:
-                        f.write(response.read())
-                self.update_image_ui(cache_path)
-            except Exception:
-                self.update_image_ui(None)
+            # Get a Pexels URL for a morning-themed image
+            image_url = self.fetch_pexels_image_url()
+
+            if image_url:
+                for attempt in range(3):
+                    try:
+                        req = urllib.request.Request(image_url, headers=headers)
+                        with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as response:
+                            data = response.read()
+                        if data[:3] == b'\xff\xd8\xff' or data[:8] == b'\x89PNG\r\n\x1a\n':
+                            with open(cache_path, 'wb') as f:
+                                f.write(data)
+                            self.update_image_ui(cache_path)
+                            return
+                        else:
+                            break
+                    except Exception:
+                        if attempt < 2:
+                            time.sleep(1)
+
+            self.update_image_ui(None)
 
         threading.Thread(target=download_image, daemon=True).start()
 
@@ -449,55 +527,50 @@ class FunApp(App):
         self._set_button_ready()
     
     def show_next_event(self, instance):
-        """Pick a random event and fetch a brand-new image/quote on every click"""
+        """Pick a random event and fetch a brand-new Pexels image/quote on every click"""
         if not self.events:
             return
 
         self.current_event_index = random.randrange(len(self.events))
         event = self.events[self.current_event_index]
-        self.event_title.text = self._summarize_title(event["name"])
+        self.event_title.text = self._summarize_title(event['name'])
         self.quote_label.text = self._pick_quote(event["quotes"])
 
-        # Seedless picsum URL — each request follows a redirect to a different random image
-        event["image_url"] = "https://picsum.photos/1200/800"
-
-        # Delete cached image to force a fresh download
+        # Delete cached image to force a fresh Pexels download
         cache_path = self.get_cached_image_path(self.current_event_index)
         if os.path.exists(cache_path):
             os.remove(cache_path)
 
         self.load_event_image(self.current_event_index)
 
-    def share_screenshot(self, instance):
-        """Take a screenshot and share it via Android share sheet"""
-        try:
-            # Clean up old share screenshots
-            for f in glob.glob(os.path.join(self.user_data_dir, 'share_*.png')):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
+    def share_whatsapp(self, instance):
+        """Take a screenshot and share it directly to WhatsApp via Android intent."""
+        if platform != 'android':
+            return
 
-            screenshot_path = os.path.join(self.user_data_dir, 'share_{:04d}.png')
-            actual_path = Window.screenshot(name=screenshot_path)
+        def _do():
+            try:
+                # Clean up previous share screenshots
+                for f in glob.glob(os.path.join(self.user_data_dir, 'share_*.png')):
+                    try:
+                        os.remove(f)
+                    except Exception:
+                        pass
 
-            if actual_path and os.path.exists(actual_path):
-                Clock.schedule_once(lambda dt: self._do_share(actual_path), 0.5)
-        except Exception:
-            pass
+                screenshot_path = os.path.join(self.user_data_dir, 'share_{:04d}.png')
+                actual_path = Window.screenshot(name=screenshot_path)
+                if not actual_path or not os.path.exists(actual_path):
+                    return
 
-    def _do_share(self, screenshot_path):
-        """Trigger platform share sheet with screenshot"""
-        try:
-            if not os.path.exists(screenshot_path):
-                return
-            if platform == 'android':
-                self._share_android(screenshot_path)
-            # On desktop: screenshot saved silently, no share sheet
-        except Exception:
-            pass
+                # Small delay so Kivy finishes writing the file
+                Clock.schedule_once(lambda dt: self._send_whatsapp(actual_path), 0.5)
+            except Exception:
+                pass
 
-    def _share_android(self, screenshot_path):
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _send_whatsapp(self, screenshot_path):
+        """Fire an Android intent that opens WhatsApp with the screenshot attached."""
         try:
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -506,19 +579,19 @@ class FunApp(App):
 
             context = PythonActivity.mActivity
             java_file = autoclass('java.io.File')(screenshot_path)
-            authority = 'com.example.dailyquote.fileprovider'
+            authority = context.getPackageName() + '.fileprovider'
             uri = FileProvider.getUriForFile(context, authority, java_file)
+
+            share_text = f"{self.event_title.text}\n\n{self.quote_label.text}"
 
             intent = Intent(Intent.ACTION_SEND)
             intent.setType('image/png')
+            intent.setPackage('com.whatsapp')          # target WhatsApp directly
             intent.putExtra(Intent.EXTRA_STREAM, uri)
+            intent.putExtra(Intent.EXTRA_TEXT, share_text)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
-            share_text = f"{self.event_title.text}\n\n{self.quote_label.text}"
-            intent.putExtra(Intent.EXTRA_TEXT, share_text)
-
-            chooser = Intent.createChooser(intent, 'Share via')
-            PythonActivity.mActivity.startActivity(chooser)
+            PythonActivity.mActivity.startActivity(intent)
         except Exception:
             pass
 
