@@ -565,7 +565,7 @@ class FunApp(App):
             Clock.schedule_once(lambda dt: self._share_text_only(), 0.1)
 
     def _send_whatsapp(self, image_path):
-        """Fire an Android intent that opens WhatsApp with the image + caption."""
+        """Fire an Android ACTION_SEND intent with the image + caption."""
         try:
             from jnius import autoclass, cast
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -580,25 +580,22 @@ class FunApp(App):
 
             share_text = self.event_title.text + '\n\n' + self.quote_label.text
 
-            # Explicitly grant read permission to WhatsApp (belt-and-suspenders
-            # alongside FLAG_GRANT_READ_URI_PERMISSION + ClipData)
-            context.grantUriPermission(
-                'com.whatsapp', uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-
             intent = Intent(Intent.ACTION_SEND)
             intent.setType('image/jpeg')
-            intent.setPackage('com.whatsapp')
+            # No setPackage — let user pick from the system share sheet.
+            # setPackage('com.whatsapp') fails for WhatsApp Business users and
+            # any variant that doesn't match exactly, killing the share silently.
             intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
             intent.putExtra(Intent.EXTRA_TEXT, share_text)
-            # ClipData is required on Android 10+ for the URI permission grant to work
+            # ClipData + FLAG_GRANT_READ_URI_PERMISSION required on Android 10+
             intent.setClipData(ClipData.newRawUri('', uri))
-            intent.addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK
-            )
-            context.startActivity(intent)
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+            chooser = Intent.createChooser(intent, 'Share')
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
         except Exception as e:
-            print(f'[WhatsApp image share error] {e}')
+            print(f'[Share error] {e}')
             self._share_text_only()
 
     def _share_text_only(self):
