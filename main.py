@@ -557,22 +557,21 @@ class FunApp(App):
         if platform != 'android':
             return
 
-        # Use the Pexels image already on disk — no screenshot needed
         image_path = self.get_cached_image_path(self.current_event_index)
-        if not os.path.exists(image_path):
-            # Image not downloaded yet — silently ignore the tap
-            return
-
-        # Run the intent on the next frame so the button visual registers first
-        Clock.schedule_once(lambda dt: self._send_whatsapp(image_path), 0.1)
+        if os.path.exists(image_path):
+            Clock.schedule_once(lambda dt: self._send_whatsapp(image_path), 0.1)
+        else:
+            # Image not ready yet — share text only
+            Clock.schedule_once(lambda dt: self._share_text_only(), 0.1)
 
     def _send_whatsapp(self, image_path):
-        """Fire an Android intent that opens WhatsApp with the image + text."""
+        """Fire an Android intent that opens WhatsApp with the image + caption."""
         try:
             from jnius import autoclass, cast
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             Intent = autoclass('android.content.Intent')
             FileProvider = autoclass('androidx.core.content.FileProvider')
+            ClipData = autoclass('android.content.ClipData')
 
             context = PythonActivity.mActivity
             java_file = autoclass('java.io.File')(image_path)
@@ -584,14 +583,36 @@ class FunApp(App):
             intent = Intent(Intent.ACTION_SEND)
             intent.setType('image/jpeg')
             intent.setPackage('com.whatsapp')
-            # cast to Parcelable so jnius resolves the correct putExtra overload
             intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
             intent.putExtra(Intent.EXTRA_TEXT, share_text)
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-
+            # ClipData is required on Android 10+ for the URI permission grant to work
+            intent.setClipData(ClipData.newRawUri('', uri))
+            intent.addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK
+            )
             context.startActivity(intent)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f'[WhatsApp image share error] {e}')
+            self._share_text_only()
+
+    def _share_text_only(self):
+        """Fallback: open a system share chooser with text only (no image)."""
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Intent = autoclass('android.content.Intent')
+
+            context = PythonActivity.mActivity
+            share_text = self.event_title.text + '\n\n' + self.quote_label.text
+
+            intent = Intent(Intent.ACTION_SEND)
+            intent.setType('text/plain')
+            intent.putExtra(Intent.EXTRA_TEXT, share_text)
+            chooser = Intent.createChooser(intent, 'Share via')
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        except Exception as e:
+            print(f'[Text share error] {e}')
 
 
 if __name__ == '__main__':

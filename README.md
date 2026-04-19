@@ -1,4 +1,4 @@
-﻿# Android Morning App
+﻿# Abhi Good Morning
 
 A Kivy-based morning companion app that shows celebrity birthdays, historical events, and inspiring quotes — all paired with fresh morning-themed photography from Pexels. Runs on desktop (Windows/macOS/Linux) and builds to Android via Buildozer.
 
@@ -229,7 +229,7 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 
 | Setting | Value |
 |---------|-------|
-| Title | Daily Quote Generator |
+| Title | Abhi Good Morning |
 | Package | `dailyquote` |
 | Version | 0.1 |
 | Orientation | portrait |

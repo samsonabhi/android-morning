@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="Daily Quote Generator"
+        android:label="Abhi Good Morning"
         android:icon="@drawable/icon"
         android:allowBackup="true">
 
@@ -24,7 +24,7 @@
         -->
         <activity
             android:name="org.kivy.android.PythonActivity"
-            android:label="Daily Quote Generator"
+            android:label="Abhi Good Morning"
             android:launchMode="singleTop"
             android:exported="true"
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale"

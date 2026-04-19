@@ -1,7 +1,7 @@
 [app]
 
 # (str) Title of your application
-title = Daily Quote Generator
+title = Abhi Good Morning
 
 # (str) Package name
 package.name = dailyquote
