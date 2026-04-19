@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.dailyquote"
+    android:versionCode="1"
+    android:versionName="0.1">
+
+    <uses-sdk
+        android:minSdkVersion="26"
+        android:targetSdkVersion="34" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="Daily Quote Generator"
+        android:icon="@drawable/icon"
+        android:allowBackup="true">
+
+        <!--
+            PythonActivity: main Kivy entry point.
+            android:exported="true" is required on API 31+ for activities
+            that have an intent-filter.
+            configChanges must cover orientation/keyboard so Kivy handles
+            them itself instead of recreating the activity.
+        -->
+        <activity
+            android:name="org.kivy.android.PythonActivity"
+            android:label="Daily Quote Generator"
+            android:launchMode="singleTop"
+            android:exported="true"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            PythonService: included for completeness; not used by this app.
+            android:process=":pythonservice" isolates it in a separate process.
+        -->
+        <service
+            android:name="org.kivy.android.PythonService"
+            android:exported="false"
+            android:process=":pythonservice" />
+
+        <!--
+            FileProvider: required for sharing screenshot files with WhatsApp
+            via content:// URI on Android 7+ (API 24+).
+            Authority must match context.getPackageName() + ".fileprovider"
+            used in main.py's _send_whatsapp().
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.example.dailyquote.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
+
+    </application>
+</manifest>
