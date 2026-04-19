@@ -1,5 +1,6 @@
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.image import Image
@@ -7,6 +8,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.resources import resource_find
+from kivy.metrics import dp
 from datetime import datetime
 import os
 import glob
@@ -115,27 +117,35 @@ class FunApp(App):
             text="Refresh",
             font_size=40,
             bold=True,
-            size_hint=(0.5, 1),
+            size_hint=(0.78, 1),
             background_normal='',
             background_color=(0.18, 0.53, 0.93, 1),
             color=(1, 1, 1, 1),
         )
         self.button.bind(on_press=self.show_next_event)
 
-        # WhatsApp share button (icon, aspect-ratio preserved)
+        # WhatsApp share button — fixed small square so it doesn't dominate the bar
         wa_icon = resource_find('whatsapp_icon.png') or 'whatsapp_icon.png'
         self.whatsapp_btn = ImageButton(
             source=wa_icon,
             keep_ratio=True,
             allow_stretch=True,
-            size_hint=(0.5, 1),
+            size_hint=(None, None),
+            size=(dp(52), dp(52)),
         )
         self.whatsapp_btn.bind(on_press=self.share_whatsapp)
 
-        # Bottom bar: Refresh + WhatsApp side by side
+        # Container centres the small icon in the remaining 22% of the bar
+        wa_container = AnchorLayout(
+            anchor_x='center', anchor_y='center',
+            size_hint=(0.22, 1)
+        )
+        wa_container.add_widget(self.whatsapp_btn)
+
+        # Bottom bar: Refresh (78%) + WhatsApp icon (22%)
         bottom_bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.1))
         bottom_bar.add_widget(self.button)
-        bottom_bar.add_widget(self.whatsapp_btn)
+        bottom_bar.add_widget(wa_container)
 
         self.layout.add_widget(self.event_title)
         self.layout.add_widget(self.image)
@@ -544,30 +554,24 @@ class FunApp(App):
         self.load_event_image(self.current_event_index)
 
     def share_whatsapp(self, instance):
-        """Take a screenshot and share it directly to WhatsApp via Android intent."""
+        """Take a screenshot on the main thread and share it to WhatsApp."""
         if platform != 'android':
             return
 
-        def _do():
+        # Clean up previous share screenshots
+        for f in glob.glob(os.path.join(self.user_data_dir, 'share_*.png')):
             try:
-                # Clean up previous share screenshots
-                for f in glob.glob(os.path.join(self.user_data_dir, 'share_*.png')):
-                    try:
-                        os.remove(f)
-                    except Exception:
-                        pass
-
-                screenshot_path = os.path.join(self.user_data_dir, 'share_{:04d}.png')
-                actual_path = Window.screenshot(name=screenshot_path)
-                if not actual_path or not os.path.exists(actual_path):
-                    return
-
-                # Small delay so Kivy finishes writing the file
-                Clock.schedule_once(lambda dt: self._send_whatsapp(actual_path), 0.5)
+                os.remove(f)
             except Exception:
                 pass
 
-        threading.Thread(target=_do, daemon=True).start()
+        # Window.screenshot() uses OpenGL readback — must run on the main thread.
+        # Button press callbacks are already on the main thread so this is safe.
+        screenshot_path = os.path.join(self.user_data_dir, 'share_{0:04d}.png')
+        actual_path = Window.screenshot(name=screenshot_path)
+        if actual_path and os.path.exists(actual_path):
+            # Short delay lets Kivy finish flushing the file before we share it
+            Clock.schedule_once(lambda dt: self._send_whatsapp(actual_path), 0.5)
 
     def _send_whatsapp(self, screenshot_path):
         """Fire an Android intent that opens WhatsApp with the screenshot attached."""
