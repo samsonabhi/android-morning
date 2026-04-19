@@ -564,8 +564,18 @@ class FunApp(App):
             # Image not ready yet — share text only
             Clock.schedule_once(lambda dt: self._share_text_only(), 0.1)
 
+    def _show_toast(self, context, message):
+        """Show a short Toast message on Android for diagnostics."""
+        try:
+            from jnius import autoclass
+            Toast = autoclass('android.widget.Toast')
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        except Exception:
+            pass
+
     def _send_whatsapp(self, image_path):
         """Fire an Android ACTION_SEND intent with the image + caption."""
+        context = None
         try:
             from jnius import autoclass, cast
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -574,7 +584,15 @@ class FunApp(App):
             ClipData = autoclass('android.content.ClipData')
 
             context = PythonActivity.mActivity
-            java_file = autoclass('java.io.File')(image_path)
+
+            # Copy image into getCacheDir() so the <cache-path> entry in
+            # file_provider_paths.xml is guaranteed to cover it.
+            cache_dir = context.getCacheDir().getAbsolutePath()
+            share_path = os.path.join(cache_dir, 'share_image.jpg')
+            import shutil as _shutil
+            _shutil.copy2(image_path, share_path)
+
+            java_file = autoclass('java.io.File')(share_path)
             authority = context.getPackageName() + '.fileprovider'
             uri = FileProvider.getUriForFile(context, authority, java_file)
 
@@ -582,9 +600,6 @@ class FunApp(App):
 
             intent = Intent(Intent.ACTION_SEND)
             intent.setType('image/jpeg')
-            # No setPackage — let user pick from the system share sheet.
-            # setPackage('com.whatsapp') fails for WhatsApp Business users and
-            # any variant that doesn't match exactly, killing the share silently.
             intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
             intent.putExtra(Intent.EXTRA_TEXT, share_text)
             # ClipData + FLAG_GRANT_READ_URI_PERMISSION required on Android 10+
@@ -595,7 +610,10 @@ class FunApp(App):
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)
         except Exception as e:
-            print(f'[Share error] {e}')
+            msg = str(e)[:200]
+            print(f'[Share error] {msg}')
+            if context:
+                self._show_toast(context, msg)
             self._share_text_only()
 
     def _share_text_only(self):
