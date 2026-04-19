@@ -29,7 +29,7 @@ All network work runs in background threads. When the app closes `dataset/` is w
 | Image | Fresh morning-themed photo from Pexels on every load |
 | Quote | Never repeats the previous quote; drawn from a 50+ quote ZenQuotes cache |
 | Button | Disabled while image is loading; re-enabled on completion |
-| Share | Top-right button takes a screenshot and opens the Android share sheet |
+| Share | Bottom-right WhatsApp button sends the current title, image and quote directly to WhatsApp |
 
 ## Event Sources
 
@@ -233,11 +233,12 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 | Package | `dailyquote` |
 | Version | 0.1 |
 | Orientation | portrait |
-| Target API | 36 (Android 16) |
+| Target API | 34 (Android 14) |
 | Min API | 26 (Android 8.0) |
 | Permission | `INTERNET` |
 | Requirements | `python3, kivy, pillow, certifi` |
-| Icon | `icon.png` (512Ã—512 sunrise, project root) |
+| Icon | `icon.png` (512×512 sunrise, project root) |
+| Manifest | `AndroidManifest.xml` (custom, includes FileProvider for image sharing) |
 
 ## App Icon
 
