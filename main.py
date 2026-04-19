@@ -11,7 +11,6 @@ from kivy.resources import resource_find
 from kivy.metrics import dp
 from datetime import datetime
 import os
-import glob
 import random
 from kivy.clock import mainthread, Clock
 import threading
@@ -554,48 +553,43 @@ class FunApp(App):
         self.load_event_image(self.current_event_index)
 
     def share_whatsapp(self, instance):
-        """Take a screenshot on the main thread and share it to WhatsApp."""
+        """Share the current event image + title + quote directly to WhatsApp."""
         if platform != 'android':
             return
 
-        # Clean up previous share screenshots
-        for f in glob.glob(os.path.join(self.user_data_dir, 'share_*.png')):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
+        # Use the Pexels image already on disk — no screenshot needed
+        image_path = self.get_cached_image_path(self.current_event_index)
+        if not os.path.exists(image_path):
+            # Image not downloaded yet — silently ignore the tap
+            return
 
-        # Window.screenshot() uses OpenGL readback — must run on the main thread.
-        # Button press callbacks are already on the main thread so this is safe.
-        screenshot_path = os.path.join(self.user_data_dir, 'share_{0:04d}.png')
-        actual_path = Window.screenshot(name=screenshot_path)
-        if actual_path and os.path.exists(actual_path):
-            # Short delay lets Kivy finish flushing the file before we share it
-            Clock.schedule_once(lambda dt: self._send_whatsapp(actual_path), 0.5)
+        # Run the intent on the next frame so the button visual registers first
+        Clock.schedule_once(lambda dt: self._send_whatsapp(image_path), 0.1)
 
-    def _send_whatsapp(self, screenshot_path):
-        """Fire an Android intent that opens WhatsApp with the screenshot attached."""
+    def _send_whatsapp(self, image_path):
+        """Fire an Android intent that opens WhatsApp with the image + text."""
         try:
-            from jnius import autoclass
+            from jnius import autoclass, cast
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             Intent = autoclass('android.content.Intent')
             FileProvider = autoclass('androidx.core.content.FileProvider')
 
             context = PythonActivity.mActivity
-            java_file = autoclass('java.io.File')(screenshot_path)
+            java_file = autoclass('java.io.File')(image_path)
             authority = context.getPackageName() + '.fileprovider'
             uri = FileProvider.getUriForFile(context, authority, java_file)
 
-            share_text = f"{self.event_title.text}\n\n{self.quote_label.text}"
+            share_text = self.event_title.text + '\n\n' + self.quote_label.text
 
             intent = Intent(Intent.ACTION_SEND)
-            intent.setType('image/png')
-            intent.setPackage('com.whatsapp')          # target WhatsApp directly
-            intent.putExtra(Intent.EXTRA_STREAM, uri)
+            intent.setType('image/jpeg')
+            intent.setPackage('com.whatsapp')
+            # cast to Parcelable so jnius resolves the correct putExtra overload
+            intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
             intent.putExtra(Intent.EXTRA_TEXT, share_text)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
-            PythonActivity.mActivity.startActivity(intent)
+            context.startActivity(intent)
         except Exception:
             pass
 
