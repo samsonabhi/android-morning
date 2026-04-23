@@ -510,7 +510,7 @@ class FunApp(App):
             if frames:
                 first = gif.copy().convert('RGBA')
                 gw, gh = first.size
-                self.spinner_gif.size = (gw * 4, gh * 4)
+                self.spinner_gif.size = (gw * 8, gh * 8)
             print(f'[GIF] Loaded {len(frames)} frames from {self._gif_path}')
         except Exception as e:
             print(f'[GIF] Failed to load frames: {e}')
@@ -686,9 +686,6 @@ class FunApp(App):
                 intent.setType('text/plain')
                 intent.putExtra(Intent.EXTRA_TEXT, share_text)
 
-            # startActivity directly — Android 10+ always shows a share sheet
-            # for ACTION_SEND. Avoids createChooser(intent, CharSequence) jnius
-            # overload resolution failure.
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
 
