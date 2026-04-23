@@ -5,7 +5,6 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.image import Image
-from kivy.uix.behaviors import ButtonBehavior
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.resources import resource_find
@@ -67,11 +66,6 @@ SPECIAL_EVENTS = {
     (12, 25): {"name": "Christmas", "keywords": ["christmas", "celebration", "holiday", "festive"]},
 }
 
-class ImageButton(ButtonBehavior, Image):
-    """A pressable Image that keeps its aspect ratio."""
-    pass
-
-
 class FunApp(App):
     def build(self):
         # Initialize with loading state
@@ -108,12 +102,15 @@ class FunApp(App):
             opacity=0,
         )
 
-        # Spinner: plain Image whose texture we swap manually each frame
+        # Spinner: plain Image whose texture we swap manually each frame.
+        # size_hint=(None,None) means it uses its natural pixel size, not the
+        # container size.  pos_hint centres it.
         self.spinner_gif = Image(
-            size_hint=(1, 1),
-            pos_hint={'x': 0, 'y': 0},
+            size_hint=(None, None),
+            size=(1, 1),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},
             keep_ratio=True,
-            allow_stretch=True,
+            allow_stretch=False,
             opacity=0,
         )
 
@@ -122,8 +119,8 @@ class FunApp(App):
         # include the app's own directory after packaging with Buildozer).
         # Fall back to __file__-relative path for desktop.
         _script_dir = os.path.dirname(os.path.abspath(__file__))
-        self._gif_path = (resource_find('meme-coffee.gif')
-                          or os.path.join(_script_dir, 'meme-coffee.gif'))
+        self._gif_path = (resource_find('loading.gif')
+                          or os.path.join(_script_dir, 'loading.gif'))
         Clock.schedule_once(self._init_gif_frames, 0)
 
         # image_container fills the whole screen minus the bottom bar
@@ -143,22 +140,24 @@ class FunApp(App):
         )
         self.button.bind(on_press=self.show_next_event)
 
-        # WhatsApp icon floated on top of the bar at the right edge
-        wa_icon = resource_find('whatsapp_icon.png') or 'whatsapp_icon.png'
-        self.whatsapp_btn = ImageButton(
-            source=wa_icon,
-            keep_ratio=True,
-            allow_stretch=True,
+        # Quick Share button — standard Button with icon as background.
+        # Using a plain Button instead of the custom ImageButton avoids
+        # ButtonBehavior + Image touch-dispatch issues on Android.
+        share_icon = resource_find('share_icon.png') or 'share_icon.png'
+        self.share_btn = Button(
+            background_normal=share_icon,
+            background_down=share_icon,
+            background_color=(1, 1, 1, 1),
             size_hint=(None, None),
             size=(dp(52), dp(52)),
             pos_hint={'right': 0.98, 'center_y': 0.5},
         )
-        self.whatsapp_btn.bind(on_press=self.share_whatsapp)
+        self.share_btn.bind(on_press=self.share_image)
 
-        # Bottom bar: single FloatLayout so the WA icon overlays the button
+        # Bottom bar: single FloatLayout so the share icon overlays the button
         bottom_bar = FloatLayout(size_hint=(1, 0.1))
         bottom_bar.add_widget(self.button)
-        bottom_bar.add_widget(self.whatsapp_btn)
+        bottom_bar.add_widget(self.share_btn)
 
         self.layout.add_widget(self.image_container)
         self.layout.add_widget(bottom_bar)
@@ -507,6 +506,11 @@ class FunApp(App):
             except EOFError:
                 pass
             self._gif_frames = frames
+            # Set widget to 2× the GIF's natural pixel dimensions.
+            if frames:
+                first = gif.copy().convert('RGBA')
+                gw, gh = first.size
+                self.spinner_gif.size = (gw * 4, gh * 4)
             print(f'[GIF] Loaded {len(frames)} frames from {self._gif_path}')
         except Exception as e:
             print(f'[GIF] Failed to load frames: {e}')
@@ -563,6 +567,7 @@ class FunApp(App):
             image_url = self.fetch_pexels_image_url()
 
             if image_url:
+                downloaded = False
                 for attempt in range(3):
                     try:
                         req = urllib.request.Request(image_url, headers=headers)
@@ -571,32 +576,39 @@ class FunApp(App):
                         if data[:3] == b'\xff\xd8\xff' or data[:8] == b'\x89PNG\r\n\x1a\n':
                             with open(cache_path, 'wb') as f:
                                 f.write(data)
-                            self._composite_image(cache_path, composite_path)
-                            self.update_image_ui(composite_path)
-                            return
-                        else:
+                            downloaded = True
                             break
                     except Exception:
                         if attempt < 2:
                             time.sleep(1)
+
+                if downloaded:
+                    # Composite outside the network try/except — a compositing
+                    # failure must never trigger a re-download retry.
+                    self._composite_image(cache_path, composite_path)
+                    display_path = composite_path if os.path.exists(composite_path) else cache_path
+                    self.update_image_ui(display_path)
+                    return
 
             self.update_image_ui(None)
 
         threading.Thread(target=download_image, daemon=True).start()
 
     @mainthread
-    def update_image_ui(self, composite_path):
+    def update_image_ui(self, display_path):
         """Update the image widget with the composited image, bypassing Kivy's texture cache."""
         from kivy.cache import Cache
-        if composite_path and os.path.exists(composite_path):
-            Cache.remove('kv.image', composite_path)
-            Cache.remove('kv.texture', composite_path)
-            self.image.source = ''
-            self.image.source = composite_path
+        if display_path and os.path.exists(display_path):
+            Cache.remove('kv.image', display_path)
+            Cache.remove('kv.texture', display_path)
+            self.image.source = display_path
             self.image.reload()
-        else:
-            self.image.source = ''
-        self._set_button_ready()
+        # Inline the stop-spinner + button reset so opacity is applied on this
+        # same frame, not deferred by a second @mainthread schedule_once call.
+        self._stop_spinner()
+        self.button.disabled = False
+        self.button.text = "Refresh"
+        self.button.background_color = (0.18, 0.53, 0.93, 1)
     
     def show_next_event(self, instance):
         """Pick a random event and fetch a brand-new Pexels image/quote on every click"""
@@ -618,137 +630,210 @@ class FunApp(App):
 
         self.load_event_image(self.current_event_index)
 
-    def share_whatsapp(self, instance):
-        """Share the current event image + title + quote directly to WhatsApp."""
+    def share_image(self, instance):
+        """Share the current event image via the system share sheet.
+        Uses MediaStore.Images.Media.insertImage() to get a content:// URI —
+        no FileProvider, no XML resource, no extra permissions needed."""
         if platform != 'android':
             self._share_desktop_simulation()
             return
 
-        # Use the composite (text already burned in); fall back to raw image
-        composite_path = self.get_composite_image_path(self.current_event_index)
-        raw_path = self.get_cached_image_path(self.current_event_index)
-        image_path = composite_path if os.path.exists(composite_path) else (
-                     raw_path if os.path.exists(raw_path) else None)
+        # Kivy visual feedback — works even if jnius fails
+        self.share_btn.background_color = (0.5, 0.5, 0.5, 1)
+        Clock.schedule_once(
+            lambda dt: setattr(self.share_btn, 'background_color', (1, 1, 1, 1)), 0.4
+        )
 
-        if image_path:
-            Clock.schedule_once(lambda dt: self._send_whatsapp(image_path), 0.1)
-        else:
-            # Image not ready yet — share text only
-            Clock.schedule_once(lambda dt: self._share_text_only(), 0.1)
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Intent         = autoclass('android.content.Intent')
+            ClipData       = autoclass('android.content.ClipData')
+            MediaStore     = autoclass('android.provider.MediaStore$Images$Media')
+
+            context    = PythonActivity.mActivity
+            share_text = self.event_title.text + '\n\n' + self.quote_label.text
+
+            composite_path = self.get_composite_image_path(self.current_event_index)
+            raw_path       = self.get_cached_image_path(self.current_event_index)
+            image_path     = composite_path if os.path.exists(composite_path) else (
+                             raw_path       if os.path.exists(raw_path)       else None)
+
+            if image_path:
+                # insertImage copies the file into MediaStore and returns a
+                # content:// URI that any app can read — no FileProvider needed.
+                uri = MediaStore.insertImage(
+                    context.getContentResolver(),
+                    image_path,
+                    'morning_share',
+                    share_text
+                )
+                if uri is None:
+                    raise RuntimeError(f'MediaStore.insertImage returned None for {image_path}')
+
+                # uri is a String — convert to android.net.Uri
+                Uri = autoclass('android.net.Uri')
+                uri_obj = Uri.parse(uri)
+
+                intent = Intent(Intent.ACTION_SEND)
+                intent.setType('image/jpeg')
+                intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri_obj))
+                intent.putExtra(Intent.EXTRA_TEXT, share_text)
+                intent.setClipData(ClipData.newRawUri('', uri_obj))
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            else:
+                intent = Intent(Intent.ACTION_SEND)
+                intent.setType('text/plain')
+                intent.putExtra(Intent.EXTRA_TEXT, share_text)
+
+            # startActivity directly — Android 10+ always shows a share sheet
+            # for ACTION_SEND. Avoids createChooser(intent, CharSequence) jnius
+            # overload resolution failure.
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+
+        except Exception as e:
+            print(f'[Share error] {e}')
+            from kivy.uix.popup import Popup
+            from kivy.uix.label import Label
+            Popup(
+                title='Share error',
+                content=Label(text=str(e)[:300], text_size=(Window.width * 0.8, None)),
+                size_hint=(0.9, 0.5),
+            ).open()
 
     def _composite_image(self, image_path, out_path):
         """Render title + quote text onto the image and save to out_path.
-        Returns True on success, False if Pillow is unavailable."""
+        Falls back to a plain copy if anything fails so out_path is always produced."""
         try:
             from PIL import Image as PilImage, ImageDraw, ImageFont
-        except ImportError:
-            shutil.copy2(image_path, out_path)
+
+            title = self.event_title.text
+            quote = self.quote_label.text
+
+            img = PilImage.open(image_path).convert('RGB')
+            w, h = img.size
+            draw = ImageDraw.Draw(img)
+
+            font_size_title = max(16, h // 27)
+            font_size_quote = max(12, h // 39)
+
+            def _load_font(size, bold=False):
+                # kivy_data_dir points to Kivy's bundled assets on both desktop
+                # and Android (extracted from the APK at runtime by Kivy itself).
+                from kivy import kivy_data_dir
+                kd = os.path.join(kivy_data_dir, 'fonts')
+                candidates = []
+                if bold:
+                    candidates += [
+                        os.path.join(kd, 'DroidSans-Bold.ttf'),
+                        os.path.join(kd, 'Roboto-Bold.ttf'),
+                        resource_find('fonts/DroidSans-Bold.ttf'),
+                        resource_find('fonts/Roboto-Bold.ttf'),
+                        'DejaVuSans-Bold.ttf', 'arialbd.ttf', 'arial.ttf',
+                    ]
+                else:
+                    candidates += [
+                        os.path.join(kd, 'DroidSans.ttf'),
+                        os.path.join(kd, 'Roboto-Regular.ttf'),
+                        resource_find('fonts/DroidSans.ttf'),
+                        resource_find('fonts/Roboto-Regular.ttf'),
+                        'DejaVuSans.ttf', 'arial.ttf',
+                    ]
+                for path in candidates:
+                    if not path:
+                        continue
+                    try:
+                        return ImageFont.truetype(path, size)
+                    except Exception:
+                        pass
+                # Last resort: scale the default bitmap font up using a
+                # FreeType-compatible wrapper so the size parameter is honoured.
+                try:
+                    return ImageFont.load_default(size=size)
+                except TypeError:
+                    return ImageFont.load_default()
+
+            font_title = _load_font(font_size_title, bold=True)
+            font_quote = _load_font(font_size_quote, bold=False)
+
+            # textbbox requires Pillow >= 8.0.0; fall back to getsize for older builds
+            def _text_w(text, font):
+                try:
+                    bb = draw.textbbox((0, 0), text, font=font)
+                    return bb[2] - bb[0], bb[3] - bb[1]
+                except AttributeError:
+                    return draw.textsize(text, font=font)
+
+            def wrap_text(text, font, max_width):
+                words = text.split()
+                lines, line = [], ''
+                for word in words:
+                    test = (line + ' ' + word).strip()
+                    tw, _ = _text_w(test, font)
+                    if tw <= max_width:
+                        line = test
+                    else:
+                        if line:
+                            lines.append(line)
+                        line = word
+                if line:
+                    lines.append(line)
+                return lines
+
+            padding = w // 20
+            max_text_w = w - 2 * padding
+
+            title_lines = wrap_text(title, font_title, max_text_w)
+            quote_lines = wrap_text(quote, font_quote, max_text_w)
+
+            def line_h(font):
+                _, lh = _text_w('Ay', font)
+                return lh
+
+            block_h = (len(title_lines) * (line_h(font_title) + 4)
+                       + 12
+                       + len(quote_lines) * (line_h(font_quote) + 4)
+                       + padding)
+
+            overlay = PilImage.new('RGBA', img.size, (0, 0, 0, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            banner_top = max(0, h - block_h - padding)
+            overlay_draw.rectangle([(0, banner_top), (w, h)], fill=(0, 0, 0, 160))
+            img = PilImage.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
+            draw = ImageDraw.Draw(img)
+
+            y = banner_top + padding // 2
+            for line in title_lines:
+                draw.text((padding + 1, y + 1), line, font=font_title, fill=(0, 0, 0))
+                draw.text((padding, y), line, font=font_title, fill=(255, 230, 50))
+                y += line_h(font_title) + 4
+            y += 12
+            for line in quote_lines:
+                draw.text((padding + 1, y + 1), line, font=font_quote, fill=(0, 0, 0))
+                draw.text((padding, y), line, font=font_quote, fill=(255, 255, 255))
+                y += line_h(font_quote) + 4
+
+            img.save(out_path, 'JPEG', quality=90)
+            return True
+
+        except Exception as e:
+            print(f'[Composite error] {e}')
+            try:
+                shutil.copy2(image_path, out_path)
+            except Exception as copy_err:
+                print(f'[Composite copy fallback error] {copy_err}')
             return False
 
-        title = self.event_title.text
-        quote = self.quote_label.text
-
-        img = PilImage.open(image_path).convert('RGB')
-        w, h = img.size
-        draw = ImageDraw.Draw(img)
-
-        # Try to load a font that exists on both desktop and Android.
-        # Kivy always bundles DroidSans; resource_find locates it in the
-        # Kivy data directory on both platforms.
-        font_size_title = max(16, h // 27)
-        font_size_quote = max(12, h // 39)
-
-        def _load_font(size, bold=False):
-            candidates = []
-            if bold:
-                candidates += [
-                    resource_find('fonts/DroidSans-Bold.ttf'),
-                    resource_find('fonts/Roboto-Bold.ttf'),
-                    'DejaVuSans-Bold.ttf', 'arialbd.ttf', 'arial.ttf',
-                ]
-            else:
-                candidates += [
-                    resource_find('fonts/DroidSans.ttf'),
-                    resource_find('fonts/Roboto-Regular.ttf'),
-                    'DejaVuSans.ttf', 'arial.ttf',
-                ]
-            for path in candidates:
-                if not path:
-                    continue
-                try:
-                    return ImageFont.truetype(path, size)
-                except Exception:
-                    pass
-            return ImageFont.load_default()
-
-        font_title = _load_font(font_size_title, bold=True)
-        font_quote = _load_font(font_size_quote, bold=False)
-
-        def wrap_text(text, font, max_width):
-            words = text.split()
-            lines, line = [], ''
-            for word in words:
-                test = (line + ' ' + word).strip()
-                bbox = draw.textbbox((0, 0), test, font=font)
-                if bbox[2] - bbox[0] <= max_width:
-                    line = test
-                else:
-                    if line:
-                        lines.append(line)
-                    line = word
-            if line:
-                lines.append(line)
-            return lines
-
-        padding = w // 20
-        max_text_w = w - 2 * padding
-
-        title_lines = wrap_text(title, font_title, max_text_w)
-        quote_lines = wrap_text(quote, font_quote, max_text_w)
-
-        def line_h(font):
-            bbox = draw.textbbox((0, 0), 'Ay', font=font)
-            return bbox[3] - bbox[1]
-
-        block_h = (len(title_lines) * (line_h(font_title) + 4)
-                   + 12
-                   + len(quote_lines) * (line_h(font_quote) + 4)
-                   + padding)
-
-        # Semi-transparent dark banner at the bottom
-        overlay = PilImage.new('RGBA', img.size, (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-        banner_top = h - block_h - padding
-        overlay_draw.rectangle(
-            [(0, banner_top), (w, h)],
-            fill=(0, 0, 0, 160)
-        )
-        img = PilImage.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
-        draw = ImageDraw.Draw(img)
-
-        y = banner_top + padding // 2
-        for line in title_lines:
-            draw.text((padding + 1, y + 1), line, font=font_title, fill=(0, 0, 0, 200))
-            draw.text((padding, y), line, font=font_title, fill=(255, 230, 50))
-            y += line_h(font_title) + 4
-        y += 12
-        for line in quote_lines:
-            draw.text((padding + 1, y + 1), line, font=font_quote, fill=(0, 0, 0, 200))
-            draw.text((padding, y), line, font=font_quote, fill=(255, 255, 255))
-            y += line_h(font_quote) + 4
-
-        img.save(out_path, 'JPEG', quality=90)
-        return True
-
     def _share_desktop_simulation(self):
-        """Desktop-only: simulate the share flow so it can be tested without Android.
+        """Desktop-only: simulate the Quick Share flow so it can be tested without Android.
         Composites title + quote onto the image exactly as the Android path does,
         then opens the result so you can inspect it."""
         import tempfile
         image_path = self.get_cached_image_path(self.current_event_index)
         share_text = self.event_title.text + '\n\n' + self.quote_label.text
 
-        print('[Share simulation] ---- WhatsApp share preview ----')
+        print('[Share simulation] ---- Quick Share preview ----')
         print(f'[Share simulation] Text:\n{share_text}')
 
         if os.path.exists(image_path):
@@ -763,87 +848,6 @@ class FunApp(App):
                 print(f'[Share simulation] Could not open image: {e}')
         else:
             print(f'[Share simulation] Image not ready at: {image_path} — would fall back to text-only')
-
-    def _show_toast(self, context, message):
-        """Show a short Toast message on Android for diagnostics."""
-        try:
-            from jnius import autoclass
-            Toast = autoclass('android.widget.Toast')
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-        except Exception:
-            pass
-
-    def _send_whatsapp(self, image_path):
-        """Fire an Android ACTION_SEND intent with the image + caption."""
-        context = None
-        try:
-            from jnius import autoclass, cast
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            Intent = autoclass('android.content.Intent')
-            FileProvider = autoclass('androidx.core.content.FileProvider')
-            ClipData = autoclass('android.content.ClipData')
-
-            context = PythonActivity.mActivity
-
-            # Composite text onto the image and write into getCacheDir() so
-            # the <cache-path> entry in file_provider_paths.xml covers it.
-            cache_dir = context.getCacheDir().getAbsolutePath()
-            share_path = os.path.join(cache_dir, 'share_image.jpg')
-            self._composite_image(image_path, share_path)
-
-            java_file = autoclass('java.io.File')(share_path)
-            authority = context.getPackageName() + '.fileprovider'
-            uri = FileProvider.getUriForFile(context, authority, java_file)
-
-            share_text = self.event_title.text + '\n\n' + self.quote_label.text
-
-            intent = Intent(Intent.ACTION_SEND)
-            intent.setType('image/jpeg')
-            intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
-            intent.putExtra(Intent.EXTRA_TEXT, share_text)
-            # ClipData + FLAG_GRANT_READ_URI_PERMISSION required on Android 10+
-            intent.setClipData(ClipData.newRawUri('', uri))
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-
-            # Explicitly grant URI read permission to WhatsApp packages.
-            # FLAG_GRANT_READ_URI_PERMISSION alone is not reliably forwarded
-            # by createChooser() to the individual apps on Android 10+.
-            for pkg in ('com.whatsapp', 'com.whatsapp.w4b'):
-                try:
-                    context.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                except Exception:
-                    pass
-
-            chooser = Intent.createChooser(intent, 'Share')
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            context.startActivity(chooser)
-        except Exception as e:
-            msg = str(e)[:200]
-            print(f'[Share error] {msg}')
-            if context:
-                self._show_toast(context, msg)
-            self._share_text_only()
-
-    def _share_text_only(self):
-        """Fallback: open a system share chooser with text only (no image)."""
-        try:
-            from jnius import autoclass
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            Intent = autoclass('android.content.Intent')
-
-            context = PythonActivity.mActivity
-            share_text = self.event_title.text + '\n\n' + self.quote_label.text
-
-            intent = Intent(Intent.ACTION_SEND)
-            intent.setType('text/plain')
-            intent.putExtra(Intent.EXTRA_TEXT, share_text)
-            chooser = Intent.createChooser(intent, 'Share via')
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(chooser)
-        except Exception as e:
-            print(f'[Text share error] {e}')
-
 
 if __name__ == '__main__':
     FunApp().run()
