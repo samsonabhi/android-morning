@@ -1,6 +1,7 @@
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.image import Image
@@ -79,51 +80,70 @@ class FunApp(App):
         self._quotes_cache = []
         self._last_quote = ""
 
+        # GIF frame playback state
+        self._gif_frames = []
+        self._gif_frame_idx = 0
+        self._gif_clock = None
+
+        # Black background so no white flash during loads
+        Window.clearcolor = (0, 0, 0, 1)
+
         # Clean dataset folder on startup
         self._clean_dataset()
 
         # Layout
         self.layout = BoxLayout(orientation='vertical')
 
-        # Event title label
-        self.event_title = Label(
-            text="Loading today's events...",
-            font_size=60,
-            bold=True,
-            halign='center',
-            valign='middle',
-            size_hint=(1, 0.17)
-        )
-        self.event_title.bind(size=self.event_title.setter('text_size'))
-        
-        # Image widget
+        # Hidden labels — not added to layout, but their .text is read by
+        # _composite_image() to burn title + quote onto the display image.
+        self.event_title = Label(text="Loading today's events...")
+        self.quote_label = Label(text="Fetching inspiring quotes...")
+
+        # Main display image (shows the composited photo)
         self.image = Image(
-            size_hint=(1, 0.45)
+            size_hint=(1, 1),
+            pos_hint={'x': 0, 'y': 0},
+            keep_ratio=True,
+            allow_stretch=True,
+            opacity=0,
         )
-        
-        # Quote label
-        self.quote_label = Label(
-            text="Fetching inspiring quotes...",
-            font_size=50,
-            halign='center',
-            valign='middle',
-            size_hint=(1, 0.2)
+
+        # Spinner: plain Image whose texture we swap manually each frame
+        self.spinner_gif = Image(
+            size_hint=(1, 1),
+            pos_hint={'x': 0, 'y': 0},
+            keep_ratio=True,
+            allow_stretch=True,
+            opacity=0,
         )
-        self.quote_label.bind(size=self.quote_label.setter('text_size'))
+
+        # Load GIF frames via PIL after the first frame is rendered.
+        # resource_find works on Android (searches Kivy's resource dirs which
+        # include the app's own directory after packaging with Buildozer).
+        # Fall back to __file__-relative path for desktop.
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        self._gif_path = (resource_find('meme-coffee.gif')
+                          or os.path.join(_script_dir, 'meme-coffee.gif'))
+        Clock.schedule_once(self._init_gif_frames, 0)
+
+        # image_container fills the whole screen minus the bottom bar
+        self.image_container = FloatLayout(size_hint=(1, 0.9))
+        self.image_container.add_widget(self.image)
+        self.image_container.add_widget(self.spinner_gif)
         
-        # Button
+        # Button fills the entire bar
         self.button = Button(
             text="Refresh",
             font_size=40,
             bold=True,
-            size_hint=(0.78, 1),
+            size_hint=(1, 1),
             background_normal='',
             background_color=(0.18, 0.53, 0.93, 1),
             color=(1, 1, 1, 1),
         )
         self.button.bind(on_press=self.show_next_event)
 
-        # WhatsApp share button — fixed small square so it doesn't dominate the bar
+        # WhatsApp icon floated on top of the bar at the right edge
         wa_icon = resource_find('whatsapp_icon.png') or 'whatsapp_icon.png'
         self.whatsapp_btn = ImageButton(
             source=wa_icon,
@@ -131,24 +151,16 @@ class FunApp(App):
             allow_stretch=True,
             size_hint=(None, None),
             size=(dp(52), dp(52)),
+            pos_hint={'right': 0.98, 'center_y': 0.5},
         )
         self.whatsapp_btn.bind(on_press=self.share_whatsapp)
 
-        # Container centres the small icon in the remaining 22% of the bar
-        wa_container = AnchorLayout(
-            anchor_x='center', anchor_y='center',
-            size_hint=(0.22, 1)
-        )
-        wa_container.add_widget(self.whatsapp_btn)
-
-        # Bottom bar: Refresh (78%) + WhatsApp icon (22%)
-        bottom_bar = BoxLayout(orientation='horizontal', size_hint=(1, 0.1))
+        # Bottom bar: single FloatLayout so the WA icon overlays the button
+        bottom_bar = FloatLayout(size_hint=(1, 0.1))
         bottom_bar.add_widget(self.button)
-        bottom_bar.add_widget(wa_container)
+        bottom_bar.add_widget(self.whatsapp_btn)
 
-        self.layout.add_widget(self.event_title)
-        self.layout.add_widget(self.image)
-        self.layout.add_widget(self.quote_label)
+        self.layout.add_widget(self.image_container)
         self.layout.add_widget(bottom_bar)
         
         # Start loading events in background
@@ -469,18 +481,68 @@ class FunApp(App):
             os.makedirs(dataset_dir, exist_ok=True)
         return os.path.join(dataset_dir, f'event_{index}.jpg')
 
+    def get_composite_image_path(self, index):
+        """Return the path for the text-composited version of the event image."""
+        dataset_dir = os.path.join(self.user_data_dir, 'dataset')
+        if not os.path.exists(dataset_dir):
+            os.makedirs(dataset_dir, exist_ok=True)
+        return os.path.join(dataset_dir, f'event_{index}_composite.jpg')
+
+    def _init_gif_frames(self, dt):
+        """Extract every frame from the GIF into Kivy textures on the main thread."""
+        try:
+            from PIL import Image as PilImage
+            from kivy.graphics.texture import Texture
+            gif = PilImage.open(self._gif_path)
+            frames = []
+            try:
+                while True:
+                    frame = gif.copy().convert('RGBA')
+                    w, h = frame.size
+                    tex = Texture.create(size=(w, h), colorfmt='rgba')
+                    tex.blit_buffer(frame.tobytes(), colorfmt='rgba', bufferfmt='ubyte')
+                    tex.flip_vertical()
+                    frames.append(tex)
+                    gif.seek(gif.tell() + 1)
+            except EOFError:
+                pass
+            self._gif_frames = frames
+            print(f'[GIF] Loaded {len(frames)} frames from {self._gif_path}')
+        except Exception as e:
+            print(f'[GIF] Failed to load frames: {e}')
+
+    def _advance_gif_frame(self, dt):
+        if self._gif_frames:
+            self.spinner_gif.texture = self._gif_frames[self._gif_frame_idx]
+            self._gif_frame_idx = (self._gif_frame_idx + 1) % len(self._gif_frames)
+
+    def _start_spinner(self):
+        self.image.opacity = 0
+        self.spinner_gif.opacity = 1
+        if self._gif_frames and self._gif_clock is None:
+            self._gif_frame_idx = 0
+            self._gif_clock = Clock.schedule_interval(self._advance_gif_frame, 0.05)
+
+    def _stop_spinner(self):
+        self.spinner_gif.opacity = 0
+        if self._gif_clock:
+            self._gif_clock.cancel()
+            self._gif_clock = None
+        self.image.opacity = 1
+
     @mainthread
     def _set_button_loading(self):
         self.button.disabled = True
         self.button.text = "Loading image…"
         self.button.background_color = (0.45, 0.45, 0.45, 1)
-        self.image.source = ''
+        self._start_spinner()
 
     @mainthread
     def _set_button_ready(self):
         self.button.disabled = False
         self.button.text = "Refresh"
         self.button.background_color = (0.18, 0.53, 0.93, 1)
+        self._stop_spinner()
 
     def load_event_image(self, index):
         """Fetch a morning-themed image from Pexels and display it."""
@@ -488,10 +550,11 @@ class FunApp(App):
 
         def download_image():
             cache_path = self.get_cached_image_path(index)
+            composite_path = self.get_composite_image_path(index)
 
-            # Use cached file if it already exists for this event
-            if os.path.exists(cache_path):
-                self.update_image_ui(cache_path)
+            # Use composite if it already exists for this event
+            if os.path.exists(composite_path):
+                self.update_image_ui(composite_path)
                 return
 
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -508,7 +571,8 @@ class FunApp(App):
                         if data[:3] == b'\xff\xd8\xff' or data[:8] == b'\x89PNG\r\n\x1a\n':
                             with open(cache_path, 'wb') as f:
                                 f.write(data)
-                            self.update_image_ui(cache_path)
+                            self._composite_image(cache_path, composite_path)
+                            self.update_image_ui(composite_path)
                             return
                         else:
                             break
@@ -521,17 +585,16 @@ class FunApp(App):
         threading.Thread(target=download_image, daemon=True).start()
 
     @mainthread
-    def update_image_ui(self, image_path):
-        """Update the image widget, bypassing Kivy's texture cache"""
+    def update_image_ui(self, composite_path):
+        """Update the image widget with the composited image, bypassing Kivy's texture cache."""
         from kivy.cache import Cache
-        if image_path and os.path.exists(image_path):
-            Cache.remove('kv.image', image_path)
-            Cache.remove('kv.texture', image_path)
+        if composite_path and os.path.exists(composite_path):
+            Cache.remove('kv.image', composite_path)
+            Cache.remove('kv.texture', composite_path)
             self.image.source = ''
-            self.image.source = image_path
+            self.image.source = composite_path
             self.image.reload()
         else:
-            # Kivy Image cannot load URLs directly — leave blank on failure
             self.image.source = ''
         self._set_button_ready()
     
@@ -545,24 +608,161 @@ class FunApp(App):
         self.event_title.text = self._summarize_title(event['name'])
         self.quote_label.text = self._pick_quote(event["quotes"])
 
-        # Delete cached image to force a fresh Pexels download
+        # Delete cached images to force a fresh Pexels download and re-composite
         cache_path = self.get_cached_image_path(self.current_event_index)
         if os.path.exists(cache_path):
             os.remove(cache_path)
+        composite_path = self.get_composite_image_path(self.current_event_index)
+        if os.path.exists(composite_path):
+            os.remove(composite_path)
 
         self.load_event_image(self.current_event_index)
 
     def share_whatsapp(self, instance):
         """Share the current event image + title + quote directly to WhatsApp."""
         if platform != 'android':
+            self._share_desktop_simulation()
             return
 
-        image_path = self.get_cached_image_path(self.current_event_index)
-        if os.path.exists(image_path):
+        # Use the composite (text already burned in); fall back to raw image
+        composite_path = self.get_composite_image_path(self.current_event_index)
+        raw_path = self.get_cached_image_path(self.current_event_index)
+        image_path = composite_path if os.path.exists(composite_path) else (
+                     raw_path if os.path.exists(raw_path) else None)
+
+        if image_path:
             Clock.schedule_once(lambda dt: self._send_whatsapp(image_path), 0.1)
         else:
             # Image not ready yet — share text only
             Clock.schedule_once(lambda dt: self._share_text_only(), 0.1)
+
+    def _composite_image(self, image_path, out_path):
+        """Render title + quote text onto the image and save to out_path.
+        Returns True on success, False if Pillow is unavailable."""
+        try:
+            from PIL import Image as PilImage, ImageDraw, ImageFont
+        except ImportError:
+            shutil.copy2(image_path, out_path)
+            return False
+
+        title = self.event_title.text
+        quote = self.quote_label.text
+
+        img = PilImage.open(image_path).convert('RGB')
+        w, h = img.size
+        draw = ImageDraw.Draw(img)
+
+        # Try to load a font that exists on both desktop and Android.
+        # Kivy always bundles DroidSans; resource_find locates it in the
+        # Kivy data directory on both platforms.
+        font_size_title = max(16, h // 27)
+        font_size_quote = max(12, h // 39)
+
+        def _load_font(size, bold=False):
+            candidates = []
+            if bold:
+                candidates += [
+                    resource_find('fonts/DroidSans-Bold.ttf'),
+                    resource_find('fonts/Roboto-Bold.ttf'),
+                    'DejaVuSans-Bold.ttf', 'arialbd.ttf', 'arial.ttf',
+                ]
+            else:
+                candidates += [
+                    resource_find('fonts/DroidSans.ttf'),
+                    resource_find('fonts/Roboto-Regular.ttf'),
+                    'DejaVuSans.ttf', 'arial.ttf',
+                ]
+            for path in candidates:
+                if not path:
+                    continue
+                try:
+                    return ImageFont.truetype(path, size)
+                except Exception:
+                    pass
+            return ImageFont.load_default()
+
+        font_title = _load_font(font_size_title, bold=True)
+        font_quote = _load_font(font_size_quote, bold=False)
+
+        def wrap_text(text, font, max_width):
+            words = text.split()
+            lines, line = [], ''
+            for word in words:
+                test = (line + ' ' + word).strip()
+                bbox = draw.textbbox((0, 0), test, font=font)
+                if bbox[2] - bbox[0] <= max_width:
+                    line = test
+                else:
+                    if line:
+                        lines.append(line)
+                    line = word
+            if line:
+                lines.append(line)
+            return lines
+
+        padding = w // 20
+        max_text_w = w - 2 * padding
+
+        title_lines = wrap_text(title, font_title, max_text_w)
+        quote_lines = wrap_text(quote, font_quote, max_text_w)
+
+        def line_h(font):
+            bbox = draw.textbbox((0, 0), 'Ay', font=font)
+            return bbox[3] - bbox[1]
+
+        block_h = (len(title_lines) * (line_h(font_title) + 4)
+                   + 12
+                   + len(quote_lines) * (line_h(font_quote) + 4)
+                   + padding)
+
+        # Semi-transparent dark banner at the bottom
+        overlay = PilImage.new('RGBA', img.size, (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+        banner_top = h - block_h - padding
+        overlay_draw.rectangle(
+            [(0, banner_top), (w, h)],
+            fill=(0, 0, 0, 160)
+        )
+        img = PilImage.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
+        draw = ImageDraw.Draw(img)
+
+        y = banner_top + padding // 2
+        for line in title_lines:
+            draw.text((padding + 1, y + 1), line, font=font_title, fill=(0, 0, 0, 200))
+            draw.text((padding, y), line, font=font_title, fill=(255, 230, 50))
+            y += line_h(font_title) + 4
+        y += 12
+        for line in quote_lines:
+            draw.text((padding + 1, y + 1), line, font=font_quote, fill=(0, 0, 0, 200))
+            draw.text((padding, y), line, font=font_quote, fill=(255, 255, 255))
+            y += line_h(font_quote) + 4
+
+        img.save(out_path, 'JPEG', quality=90)
+        return True
+
+    def _share_desktop_simulation(self):
+        """Desktop-only: simulate the share flow so it can be tested without Android.
+        Composites title + quote onto the image exactly as the Android path does,
+        then opens the result so you can inspect it."""
+        import tempfile
+        image_path = self.get_cached_image_path(self.current_event_index)
+        share_text = self.event_title.text + '\n\n' + self.quote_label.text
+
+        print('[Share simulation] ---- WhatsApp share preview ----')
+        print(f'[Share simulation] Text:\n{share_text}')
+
+        if os.path.exists(image_path):
+            tmp_dir = tempfile.gettempdir()
+            share_path = os.path.join(tmp_dir, 'share_image.jpg')
+            self._composite_image(image_path, share_path)
+            print(f'[Share simulation] Composited image saved to: {share_path}')
+            import subprocess
+            try:
+                subprocess.Popen(['start', share_path], shell=True)
+            except Exception as e:
+                print(f'[Share simulation] Could not open image: {e}')
+        else:
+            print(f'[Share simulation] Image not ready at: {image_path} — would fall back to text-only')
 
     def _show_toast(self, context, message):
         """Show a short Toast message on Android for diagnostics."""
@@ -585,12 +785,11 @@ class FunApp(App):
 
             context = PythonActivity.mActivity
 
-            # Copy image into getCacheDir() so the <cache-path> entry in
-            # file_provider_paths.xml is guaranteed to cover it.
+            # Composite text onto the image and write into getCacheDir() so
+            # the <cache-path> entry in file_provider_paths.xml covers it.
             cache_dir = context.getCacheDir().getAbsolutePath()
             share_path = os.path.join(cache_dir, 'share_image.jpg')
-            import shutil as _shutil
-            _shutil.copy2(image_path, share_path)
+            self._composite_image(image_path, share_path)
 
             java_file = autoclass('java.io.File')(share_path)
             authority = context.getPackageName() + '.fileprovider'
@@ -606,8 +805,18 @@ class FunApp(App):
             intent.setClipData(ClipData.newRawUri('', uri))
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
+            # Explicitly grant URI read permission to WhatsApp packages.
+            # FLAG_GRANT_READ_URI_PERMISSION alone is not reliably forwarded
+            # by createChooser() to the individual apps on Android 10+.
+            for pkg in ('com.whatsapp', 'com.whatsapp.w4b'):
+                try:
+                    context.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                except Exception:
+                    pass
+
             chooser = Intent.createChooser(intent, 'Share')
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             context.startActivity(chooser)
         except Exception as e:
             msg = str(e)[:200]
