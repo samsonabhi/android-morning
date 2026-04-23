@@ -7,16 +7,17 @@ A Kivy-based morning companion app that shows celebrity birthdays, historical ev
 On launch the app:
 
 1. Wipes the `dataset/` folder to start fresh
-2. Fetches **celebrity birthdays** for today from Wikipedia's births feed, enriched with occupation and net worth data from the API Ninjas Celebrity API
+2. Fetches **celebrity birthdays** for today from Wikipedia's births feed, enriched with occupation data from the API Ninjas Celebrity API
 3. Checks today's date against a built-in holidays database
 4. Fetches up to 5 **historical events** from Wikipedia's "On this day" API
 5. For each event fetches 3 quotes from ZenQuotes
-6. Displays the first event — a 5-word summarised title, a morning-themed Pexels photo, and a quote
+6. Displays the first event — a 5-word summarised title burned onto a morning-themed Pexels photo, with a quote overlaid at the bottom
 
 Pressing **Refresh**:
 - Picks a random event each time
 - Downloads a fresh morning-themed image from Pexels on every click
-- Shows a different quote each click (never repeats the last one)
+- Composites the title and quote directly onto the image using Pillow
+- Shows a loading animation (spinning coffee GIF) while the image downloads
 - Disables itself and shows **"Loading image..."** until the download finishes, then re-enables
 
 All network work runs in background threads. When the app closes `dataset/` is wiped.
@@ -25,11 +26,33 @@ All network work runs in background threads. When the app closes `dataset/` is w
 
 | Element | Behaviour |
 |---------|-----------|
-| Title | Summarised to 5 key words, prefixed "On this day:", wraps automatically |
-| Image | Fresh morning-themed photo from Pexels on every load |
-| Quote | Never repeats the previous quote; drawn from a 50+ quote ZenQuotes cache |
-| Button | Disabled while image is loading; re-enabled on completion |
-| Share | Bottom-right button opens the system share sheet with the current image and title + quote as caption; if no image is ready yet, shares text only |
+| Image | Full-screen composite photo with title and quote burned in via Pillow |
+| Title | Summarised to 5 key words, prefixed "On this day:", rendered in yellow bold text on the image |
+| Quote | White text overlaid on a semi-transparent dark banner at the bottom of the image |
+| Loading animation | `loading.gif` displayed at 8× its natural size, centred on screen while image downloads |
+| Refresh button | Full-width blue bar at the bottom; disabled while loading |
+| Share button | Icon button (`share_icon.png`) at the bottom-right; opens Android system share sheet with the composited image and title + quote as caption; falls back to text-only if no image is ready |
+
+## Composite Image
+
+Text is rendered directly onto the downloaded photo using **Pillow** (`PIL`):
+
+- **Title**: bold, yellow (`#FFE632`), with a 1px black drop shadow, sized at `h ÷ 27` px (minimum 16 px)
+- **Quote**: white, with a 1px black drop shadow, sized at `h ÷ 39` px (minimum 12 px)
+- A semi-transparent black banner (`rgba(0,0,0,160)`) is drawn behind the text block
+- Text is word-wrapped to fit within the image width minus padding
+- Font loaded from Kivy's bundled `DroidSans.ttf` / `DroidSans-Bold.ttf` (guaranteed present on Android)
+
+## Share Feature
+
+Tapping the share button on Android:
+
+1. Reads the already-composited image from `dataset/event_N_composite.jpg`
+2. Inserts it into the Android **MediaStore** via `MediaStore.Images.Media.insertImage()` — returns a `content://` URI that any app can read without FileProvider
+3. Fires an `ACTION_SEND` intent with `image/jpeg` MIME type, the image URI, and the title + quote as text
+4. Opens the system share sheet (includes Quick Share, WhatsApp, Gmail, etc.)
+
+No `FileProvider`, no XML resource configuration needed.
 
 ## Event Sources
 
@@ -96,7 +119,7 @@ Set these constants near the top of `main.py`:
 ## Running on Desktop
 
 ```bash
-pip install kivy certifi
+pip install kivy certifi pillow
 python main.py
 ```
 
@@ -117,20 +140,15 @@ sudo adduser $USER vboxsf
 sudo reboot
 ```
 
-4. After reboot, copy the project to your home directory.
+4. Use the provided `build.sh` script for all builds (see [Automated Build Script](#automated-build-script) below).
 
 > **Important:** Buildozer must run from the VM's native filesystem — **not** from the shared folder. The vboxsf filesystem does not support symlinks, which causes the SDL2 build step to fail.
-
-```bash
-cp -r /media/sf_GitHub/android-morning ~/android-morning
-cd ~/android-morning
-```
 
 5. Install all build dependencies:
 
 ```bash
 sudo apt update && sudo apt install -y \
-    git zip unzip openjdk-17-jdk python3-pip \
+    git zip unzip openjdk-17-jdk python3-pip rsync \
     autoconf libtool pkg-config libssl-dev libffi-dev \
     build-essential cmake ninja-build zlib1g-dev
 ```
@@ -144,35 +162,16 @@ echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-7. Build:
+7. Build using the script:
 
 ```bash
-cd ~/android-morning
-buildozer android debug
+chmod +x /media/sf_GitHub/android-morning/build.sh
+/media/sf_GitHub/android-morning/build.sh android-morning
 ```
 
-The first build downloads the Android SDK and NDK (~1 GB) and takes 20–40 minutes. Subsequent builds are much faster.
+The first build downloads the Android SDK and NDK (~1 GB) and takes 20–40 minutes. Subsequent builds are incremental and take 1–3 minutes.
 
-8. Output APK is at:
-
-```
-~/android-morning/bin/dailyquote-0.1-debug.apk
-```
-
-9. Copy the APK back to the shared folder so it's accessible on Windows:
-
-```bash
-cp ~/android-morning/bin/*.apk /media/sf_GitHub/android-morning/bin/
-```
-
-10. Alternatively, serve the APK to Windows over HTTP:
-
-```bash
-cd ~/android-morning/bin
-python3 -m http.server 8000
-```
-
-Set up VirtualBox port forwarding (Host `127.0.0.1:8000` → Guest `10.0.2.15:8000`), then open `http://127.0.0.1:8000` in a Windows browser and download the `.apk`.
+8. The APK is automatically copied back to `C:\Users\slim7\Documents\GitHub\android-morning\` on the Windows side.
 
 ---
 
@@ -186,7 +185,7 @@ wsl --install
 ```bash
 # In the Ubuntu WSL terminal
 sudo apt update && sudo apt install -y \
-    git zip unzip openjdk-17-jdk python3-pip \
+    git zip unzip openjdk-17-jdk python3-pip rsync \
     autoconf libtool pkg-config libssl-dev libffi-dev \
     build-essential cmake ninja-build zlib1g-dev
 
@@ -194,16 +193,31 @@ pip3 install --user "cython<3.0" buildozer
 echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
-cp -r /mnt/c/Users/slim7/Documents/GitHub/android-morning ~/android-morning
-cd ~/android-morning
-buildozer android debug
+chmod +x /mnt/c/Users/slim7/Documents/GitHub/android-morning/build.sh
+/mnt/c/Users/slim7/Documents/GitHub/android-morning/build.sh android-morning
 ```
 
-APK will be at `~/android-morning/bin/dailyquote-0.1-debug.apk`. Copy it back:
+---
+
+## Automated Build Script
+
+`build.sh` handles syncing, building, and copying the APK back in one command.
 
 ```bash
-cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morning/bin/
+# Normal incremental build (fast — preserves .buildozer cache)
+./build.sh android-morning
+
+# Force a full clean rebuild
+./build.sh android-morning --clean
 ```
+
+**Why it's fast:** Instead of deleting and re-copying the whole project directory on every run, it uses `rsync` to sync only changed source files while preserving the `.buildozer/` cache directory. This means compiled NDK objects, Kivy, and Pillow are never recompiled unless you pass `--clean`.
+
+| Phase | First build | Subsequent builds |
+|---|---|---|
+| NDK/SDK download | ~10 min | 0 (cached) |
+| Compile Kivy/Pillow | ~20-30 min | 0 (cached) |
+| Package your Python code | ~1-2 min | ~1-2 min |
 
 ---
 
@@ -235,11 +249,13 @@ cp ~/android-morning/bin/*.apk /mnt/c/Users/slim7/Documents/GitHub/android-morni
 | Orientation | portrait |
 | Target API | 34 (Android 14) |
 | Min API | 26 (Android 8.0) |
-| Permission | `INTERNET` |
+| Permissions | `INTERNET`, `WRITE_EXTERNAL_STORAGE` (API ≤ 28 only) |
 | Requirements | `python3, kivy, pillow, certifi` |
 | Gradle dep | `androidx.core:core:1.12.0` |
 | Icon | `icon.png` (512×512 sunrise, project root) |
-| Manifest | `AndroidManifest.xml` (custom; FileProvider + package visibility for sharing) |
+| Manifest | `AndroidManifest.xml` (custom; package visibility for share sheet) |
+| SDK update | Skipped (`android.skip_update = True`) |
+| SDK licence | Auto-accepted (`android.accept_sdk_license = True`) |
 
 ## App Icon
 
